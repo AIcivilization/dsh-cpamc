@@ -1,0 +1,34 @@
+{
+  "name": "dsh-cpamc",
+  "version": "0.0.2",
+  "description": "Open the full CPAMC console inside DeepSeek Harness (dsh) — brings the CLIProxyAPI engine and its first-run configuration along, so you skip installing and wiring them up yourself. · 在 DSH 里打开完整的 CPAMC 管理界面：引擎与初始配置一起准备好，省掉单独安装和配置。",
+  "keywords": [
+    "deepseek-harness",
+    "cliproxyapi",
+    "cpa",
+    "cpamc",
+    "management-center",
+    "openai-compatible",
+    "self-hosted"
+  ],
+  "license": "MIT",
+  "author": "AIcivilization",
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AIcivilization/dsh-cpamc.git"
+  },
+  "homepage": "https://github.com/AIcivilization/dsh-cpamc#readme",
+  "bugs": {
+    "url": "https://github.com/AIcivilization/dsh-cpamc/issues"
+  }
+}
