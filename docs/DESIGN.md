@@ -184,7 +184,7 @@ WorkBuddy bridge 及其系统服务、OpenCode Zen 集成、本机模型（Ollam
 ### 7.1 启用与版本锁定
 
 - 配置里设置 `disable-control-panel: false`，由 CPA 在 `/management.html` 上提供 CPAMC。
-- CPA 会自动从网上拉取和更新管理页（**需要验证**具体机制和配置项）。如果能关掉自动更新，就关掉，并在 `engine-manifest.json` 里锁定管理页的版本和 sha256，由 dsh-cpamc 放到对应位置。如果关不掉，记录为已知偏差，并核对它不会和锁定的 CPA 管理 API 版本冲突。
+- CPA 第一次访问时会下载管理页到 `<工作目录>/static/management.html`，默认还会定期自动更新。dsh-cpamc 预先放好锁定版本（`engine-manifest.json` 里写明 sha256），并设置 `disable-auto-update-panel: true`，这样就不再下载或更新（V3 已实测）。
 - 管理页、CPA 版本、渠道插件版本三者一起写在 manifest 的兼容组合里，一起升级。
 
 ### 7.2 本机
@@ -279,16 +279,16 @@ WorkBuddy bridge 及其系统服务、OpenCode Zen 集成、本机模型（Ollam
 
 ## 12. 实现前逐项验证
 
-每一项都标出参考依据：dsh-model 的现有实现，或参考插件的做法（地址见内部交接说明，不随仓库发布）。
+实测结果见 [M0-findings.md](M0-findings.md)。✅ 已通过（macOS arm64），◐ 部分通过。每一项都标出参考依据：dsh-model 的现有实现，或参考插件的做法（地址见内部交接说明，不随仓库发布）。
 
 | # | 验证项 | 参考依据 | 不通过时 |
 |---|---|---|---|
-| V1 | 官方 CPA 发布版能否加载渠道插件包（各平台），以及渠道插件和 CPA 的版本兼容性 | 参考插件用的是从上游 tag 重新编译的 CPA（只有 Windows x64），需要确认官方发布版是否可以直接用 | 在 `AIcivilization/CLIProxyAPI` 用上游 tag 编译各平台版本，manifest 指向自己的 release（dsh-model 设计 §8 已预留这条路） |
-| V2 | 四个渠道在 CPAMC 里可见：账号列表、OAuth 登录、模型目录 | 参考插件经 `/v0/management/plugins/<id>/*` 和 `/v8/management/oauth/*` 管理 | 若 CPAMC 不显示渠道插件，R5「由原版 CPAMC 提供」无法满足，需要和你确认 |
-| V3 | CPAMC 管理页的提供方式、自动更新、能否锁版本 | CPA 配置 `disable-control-panel` 等字段 | 记录偏差（§7.1） |
+| V1 ✅ | 官方 CPA 发布版能否加载渠道插件包（各平台），以及渠道插件和 CPA 的版本兼容性 | 参考插件用的是从上游 tag 重新编译的 CPA（只有 Windows x64），需要确认官方发布版是否可以直接用 | 在 `AIcivilization/CLIProxyAPI` 用上游 tag 编译各平台版本，manifest 指向自己的 release（dsh-model 设计 §8 已预留这条路） |
+| V2 ✅ | 四个渠道在 CPAMC 里可见：账号列表、OAuth 登录、模型目录 | 参考插件经 `/v0/management/plugins/<id>/*` 和 `/v8/management/oauth/*` 管理 | 若 CPAMC 不显示渠道插件，R5「由原版 CPAMC 提供」无法满足，需要和你确认 |
+| V3 ✅ | CPAMC 管理页的提供方式、自动更新、能否锁版本 | CPA 配置 `disable-control-panel` 等字段 | 记录偏差（§7.1） |
 | V4 | DSH 有没有卸载钩子；插件更新后是否需要重启 DSH | dsh-model：更新后需要重启 DSH | 用 §10.3 的守护进程自检兜底 |
 | V5 | VPS 上 Claude 和 Codex 在 CPAMC 里能否完成 OAuth（粘贴回调地址） | dsh-model §14.2：管理接口 `oauth/callback` | 面板保留 dsh-model 的登录流程，作为 VPS 上的备用 |
-| V6 | gate 加 `/cpamc/` 前缀转发（登记文件 + 先登录后转发 + 同源校验）；CPAMC 在带前缀的路径下能否正常工作（页面资源路径、管理接口基地址） | dsh-vps `gate/server.js` 已有登录门和按路径分流；dsh-model 已读 `dsh-site.conf` 取域名 | CPAMC 不认前缀时，改用 gate 的独立子路径，或在登录页里手动填写带前缀的地址 |
+| V6 ◐ | gate 加 `/cpamc/` 前缀转发（登记文件 + 先登录后转发 + 同源校验）；CPAMC 在带前缀的路径下能否正常工作（页面资源路径、管理接口基地址） | dsh-vps `gate/server.js` 已有登录门和按路径分流；dsh-model 已读 `dsh-site.conf` 取域名 | CPAMC 不认前缀时，改用 gate 的独立子路径，或在登录页里手动填写带前缀的地址 |
 | V7 | Windows arm64：x64 仿真下 CPA 加渠道插件能否运行 | — | 0.1 在该平台标记为不支持，并在下载前提示 |
 | V8 | 同名模型跨渠道轮询的别名表写法 | 参考插件 `model-alias` | — |
 | V9 | 推荐清单里的模型实测：免费、能调通 | dsh-model `pricing` 字段（2026-10 核实） | 推荐清单为空，面板显示空状态 |
