@@ -1,6 +1,6 @@
 // daemon/client.ts — 调守护进程 /control/*（CLI 用；dsh 插件宿主端也照这个格式调）
 
-import { loadBridgeConfig } from '../bridge/runtime.js'
+import { loadBridgeConfig } from './runtime.js'
 import type { Ctx } from '../context.js'
 import { DshModelError } from '../errors.js'
 import { L, lang } from '../i18n.js'

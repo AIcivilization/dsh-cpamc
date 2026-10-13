@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { packageSummary, parseClaudeUsage, parseCodexUsage, parseGrokBilling, parseKimiUsage } from '../../src/daemon/usage.js'
+import { parseClaudeUsage, parseCodexUsage } from '../../src/daemon/usage.js'
 
 describe('subscription usage parsers', () => {
   it('codex: primary/secondary windows, plan and credits', () => {
@@ -21,24 +21,6 @@ describe('subscription usage parsers', () => {
   it('claude: five_hour / seven_day / opus windows', () => {
     const r = parseClaudeUsage({ five_hour: { utilization: 12, resets_at: '2026-10-09T12:00:00Z' }, seven_day: { utilization: 40.5, resets_at: '2026-10-14T00:00:00Z' }, seven_day_opus: { utilization: 3 } })
     expect(r.windows.map((w) => [w.id, w.usedPercent])).toEqual([['5h', 12], ['7d', 40.5], ['opus-7d', 3]])
-  })
-
-  it('kimi: 5-hour limit window plus total quota', () => {
-    const r = parseKimiUsage({
-      usage: { limit: '2048', used: '214', remaining: '1834', resetTime: '2026-01-09T15:23:13.716839300Z' },
-      limits: [{ window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '200', used: '139', remaining: '61', resetTime: '2026-01-06T13:33:02.717479433Z' } }],
-    })
-    expect(r.windows[0]).toMatchObject({ label: '5h', used: 139, limit: 200, usedPercent: 69.5 })
-    expect(r.windows[1]).toMatchObject({ id: 'total', used: 214, limit: 2048 })
-  })
-
-  it('workbuddy: package names are deduplicated with counts', () => {
-    expect(packageSummary(['个人版', '加量包', '加量包', '加量包'])).toBe('个人版 + 加量包 ×3')
-  })
-
-  it('grok: tolerant credit parsing', () => {
-    expect(parseGrokBilling({ credits: { remaining: 40, total: 100 } }).credits).toEqual({ remaining: 40, total: 100, label: 'credits' })
-    expect(parseGrokBilling({}).credits).toBeUndefined()
   })
 })
 

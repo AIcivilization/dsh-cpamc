@@ -19,14 +19,10 @@ export interface UpstreamDef {
 
 export const UPSTREAMS: UpstreamDef[] = [
   { id: 'codex', label: 'Codex (ChatGPT)', flag: '-codex-login', deviceFlag: '-codex-device-login', callbackPort: 1455, filePrefix: 'codex-' },
-  { id: 'kimi', label: 'Kimi', flag: '-kimi-login', filePrefix: 'kimi-' },
-  { id: 'xai', label: 'Grok (xAI)', flag: '-xai-login', filePrefix: 'xai-' },
-  { id: 'meta', label: 'Muse (Meta)', flag: '-meta-login', filePrefix: 'meta-' },
   { id: 'claude', label: 'Claude (Pro/Max)', flag: '-claude-login', callbackPort: 54545, filePrefix: 'claude-', requiresRiskAck: true },
-  { id: 'antigravity', label: 'Antigravity', flag: '-antigravity-login', callbackPort: 51121, filePrefix: 'antigravity-', requiresRiskAck: true },
 ]
 
-const ALIASES: Record<string, string> = { grok: 'xai', muse: 'meta', chatgpt: 'codex', openai: 'codex' }
+const ALIASES: Record<string, string> = { chatgpt: 'codex', openai: 'codex' }
 
 export function getUpstream(id: string): UpstreamDef {
   const key = ALIASES[id.toLowerCase()] ?? id.toLowerCase()

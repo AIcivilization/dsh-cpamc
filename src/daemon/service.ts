@@ -1,10 +1,9 @@
-// daemon/service.ts — 确保守护进程（bridge 服务）在跑。setup 总会装它：来源开关、登录、统计都靠它
+// daemon/service.ts — 确保守护进程（bridge 服务）在跑。setup 总会装它：来源状态、key、统计、页面上的更新卸载都靠它
 
 import type { Ctx } from '../context.js'
-import { BRIDGE_DEFAULT_PORT, ensureBridgeConfig, loadBridgeConfig } from '../bridge/runtime.js'
+import { BRIDGE_DEFAULT_PORT, bridgeHealthy, ensureBridgeConfig, loadBridgeConfig } from './runtime.js'
 import { DshModelError } from '../errors.js'
 import { L } from '../i18n.js'
-import { bridgeHealthy } from '../integrations/workbuddy.js'
 import type { All } from '../ops.js'
 import { serviceFor } from '../service/index.js'
 import { ok, skip } from '../util/output.js'
@@ -30,5 +29,5 @@ export async function ensureDaemon(ctx: Ctx, all: All, opts: { restart?: boolean
   if (!(await bridgeHealthy(cfg.port, cfg.secret))) {
     throw new DshModelError('daemon_unhealthy', L(`守护进程没有在 127.0.0.1:${cfg.port} 上启动`, `Daemon did not come up on 127.0.0.1:${cfg.port}`), L('查看日志：dsh-cpamc logs --bridge', 'Check logs: dsh-cpamc logs --bridge'))
   }
-  ok(L(`守护进程已在 127.0.0.1:${cfg.port} 运行（来源开关、登录、统计）`, `Daemon running on 127.0.0.1:${cfg.port} (sources, logins, stats)`))
+  ok(L(`守护进程已在 127.0.0.1:${cfg.port} 运行（来源、key、统计）`, `Daemon running on 127.0.0.1:${cfg.port} (sources, keys, stats)`))
 }

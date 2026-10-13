@@ -1,6 +1,6 @@
-// commands/setup.ts — 一条命令：引擎（统一端点）+ OpenCode Zen + WorkBuddy bridge → 全部接进 dsh。可重复执行
+// commands/setup.ts — 一条命令：引擎 + 渠道插件 + 完整管理界面 → 守护进程 → 接进 dsh。可重复执行
 //
-// 设计 §1.3：所有模型都从引擎 127.0.0.1:8317/v1 出去，dsh 只认 dsh-cpamc 一个 provider。
+// 所有模型都从引擎 127.0.0.1:8317/v1 出去；六个来源都由引擎提供，用户在「全部功能」里登录（设计 §10.1）。
 
 import type { Ctx } from '../context.js'
 import { requireRootInVps } from '../context.js'
@@ -9,8 +9,6 @@ import { listModels, unauthStatus, waitHealthy } from '../engine/client.js'
 import { activateVersion, currentVersion, fetchUpstreamAsset, installVersion, loadManifest, platformTarget } from '../engine/install.js'
 import { DshModelError, isDshModelError } from '../errors.js'
 import { L } from '../i18n.js'
-import { migrateDshOpencode } from '../integrations/opencode.js'
-import { enableWorkbuddy, removeWorkbuddyPlugin, userPluginInstalled } from '../integrations/workbuddy.js'
 import { ensureDshKey, saveKeys, type KeyStore } from '../keys.js'
 import { applyEngineConfig, dshKey, loadAll, saveAll, syncAll, type All } from '../ops.js'
 import { serviceFor } from '../service/index.js'
@@ -19,8 +17,6 @@ import { ensureDir } from '../util/fs.js'
 import { bold, info, next, ok, skip, warn } from '../util/output.js'
 import { findFreePort, isPortFree } from '../util/port.js'
 import { detectProxy, normalizeProxyUrl, redactProxy } from '../util/proxy.js'
-import { askOpencodeKey, configureOpencode } from './opencode.js'
-import { opencodeConfigured } from '../integrations/opencode.js'
 import { ensureDaemon } from '../daemon/service.js'
 import { installDshPlugin } from '../integrations/dshplugin.js'
 import { enableCaddy } from './remote.js'
@@ -33,15 +29,11 @@ export interface SetupOptions {
   force?: boolean
   /** 代理地址；'none' = 不用代理 */
   proxy?: string
-  skipOpencode?: boolean
-  skipWorkbuddy?: boolean
   skipDshPlugin?: boolean
 }
 
 export async function setup(ctx: Ctx, opts: SetupOptions): Promise<number> {
   requireRootInVps(ctx)
-  // 要问的先问完再拿锁：等你输入时不占着锁，dsh 管理页照常能用（实测：卡在问 key 时页面新增 key 报"另一个命令正在运行"）
-  const opencodeKey = opts.skipOpencode || (await opencodeConfigured(ctx)) ? undefined : await askOpencodeKey()
   return withLock(ctx, async () => {
     const all = await loadAll(ctx)
     await ensureDir(ctx.paths.home, { owner: ctx.owner })
@@ -65,14 +57,8 @@ export async function setup(ctx: Ctx, opts: SetupOptions): Promise<number> {
       await saveAll(ctx, all)
     }
 
-    // v0.2.0 的做法（dsh 内置 opencode 路由、dsh-workbuddy-connect 插件）迁到统一端点
-    await step('migrate', async () => {
-      if (await migrateDshOpencode(ctx, all)) ok(L('已把 OpenCode 从 dsh 内置路由迁到统一端点', 'Moved OpenCode from the dsh built-in route to the unified endpoint'))
-      if (await removeWorkbuddyPlugin(ctx, all)) ok(L('已移除上一版安装的 dsh-workbuddy-connect 插件，改用 dsh-cpamc 自己的 bridge', 'Removed the dsh-workbuddy-connect plugin installed by the previous version; using dsh-cpamc\'s own bridge'))
-    })
-
     info('')
-    info(bold(L('统一端点（引擎）', 'Unified endpoint (engine)')))
+    info(bold(L('模型服务（引擎）', 'Model service (engine)')))
     let engineRunning = false
     await step('engine', async () => {
       engineRunning = await ensureEngine(ctx, all, { port: opts.port })
@@ -85,19 +71,6 @@ export async function setup(ctx: Ctx, opts: SetupOptions): Promise<number> {
     info('')
     info(bold(L('守护进程', 'Daemon')))
     await step('daemon', () => ensureDaemon(ctx, all))
-
-    info('')
-    info(bold('OpenCode Zen'))
-    if (opts.skipOpencode) skip(L('已跳过（--skip-opencode）', 'Skipped (--skip-opencode)'))
-    else await step('opencode', () => configureOpencode(ctx, all, opencodeKey !== undefined ? { key: opencodeKey } : {}))
-
-    info('')
-    info(bold('WorkBuddy'))
-    if (opts.skipWorkbuddy) skip(L('已跳过（--skip-workbuddy）', 'Skipped (--skip-workbuddy)'))
-    else {
-      await step('workbuddy', () => enableWorkbuddy(ctx, all))
-      if (await userPluginInstalled(ctx, all)) warn(L('你自己装了 dsh-workbuddy-connect 插件：dsh 里会有两组 WorkBuddy 模型。不需要的话可在 dsh 的插件页移除它', 'You installed the dsh-workbuddy-connect plugin yourself: dsh will show two WorkBuddy groups. Remove it from the dsh Plugins page if you do not need it'))
-    }
 
     info('')
     info(bold(L('dsh 插件页', 'dsh plugin page')))
@@ -145,7 +118,7 @@ export async function setup(ctx: Ctx, opts: SetupOptions): Promise<number> {
     if (failures.length) warn(L(`有 ${failures.length} 项没完成：${failures.join('、')}。修好后重新执行 dsh-cpamc setup 即可`, `${failures.length} item(s) not done: ${failures.join(', ')}. Fix them and re-run dsh-cpamc setup`))
     const base = all.state.remote?.mode === 'caddy' && all.state.remote.publicUrl ? all.state.remote.publicUrl : `http://127.0.0.1:${all.config.port}/v1`
     next(L(`在 dsh 的模型列表里选 dsh-cpamc 下的模型。其他软件：Base URL ${base}，key 用 dsh-cpamc key add <名称> 领取`, `Pick a dsh-cpamc model in dsh. Other software: Base URL ${base}, get a key with dsh-cpamc key add <name>`))
-    info(L('  订阅上游（codex 等）：dsh-cpamc login <上游>', '  Subscription upstreams (codex etc.): dsh-cpamc login <upstream>'))
+    info(L('  登录来源：在 dsh 的「设置 → dsh-cpamc」里点「全部功能」，或执行 dsh-cpamc panel', '  Sign in to sources: Settings → dsh-cpamc → All features in dsh, or run dsh-cpamc panel'))
     return failures.length ? 1 : 0
   })
 }
@@ -179,7 +152,7 @@ export async function ensureEngine(ctx: Ctx, all: All, opts: { port?: number } =
   if ((await currentVersion(ctx)) !== version) await activateVersion(ctx, version)
   config.engine.version = version
   if (!state.engine.versions.includes(version)) state.engine.versions.push(version)
-  ;(installed ? ok : skip)(L(`引擎 CLIProxyAPI v${version}${installed ? ' 已下载并校验' : ' 已安装'}`, `Engine CLIProxyAPI v${version} ${installed ? 'downloaded and verified' : 'already installed'}`))
+  ;(installed ? ok : skip)(L(`引擎 v${version}${installed ? ' 已下载并校验' : ' 已安装'}`, `Engine v${version} ${installed ? 'downloaded and verified' : 'already installed'}`))
 
   const { created } = ensureDshKey(keys)
   if (created) await saveKeys(ctx, keys)

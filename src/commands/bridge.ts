@@ -1,11 +1,11 @@
 // commands/bridge.ts — dsh-cpamc bridge run（守护进程入口，系统服务调用，常驻）与 bridge status
 //
-// 守护进程 = WorkBuddy bridge（OpenAI 兼容转发）+ 控制接口（来源开关、登录、key、统计，设计 §14）。
+// 守护进程只提供控制接口（来源状态与显示开关、key、统计、更新卸载，设计 §14），不转发模型请求。
 
-import { createBridge } from '../bridge/server.js'
-import { loadBridgeConfig } from '../bridge/runtime.js'
 import type { Ctx } from '../context.js'
 import { Daemon } from '../daemon/core.js'
+import { loadBridgeConfig } from '../daemon/runtime.js'
+import { createControlServer } from '../daemon/server.js'
 import { DshModelError } from '../errors.js'
 import { L } from '../i18n.js'
 import { info, isJsonMode, printJson } from '../util/output.js'
@@ -25,7 +25,7 @@ async function status(ctx: Ctx): Promise<number> {
     return 1
   }
   try {
-    const r = await fetch(`http://127.0.0.1:${cfg.port}/status`, { headers: { Authorization: `Bearer ${cfg.secret}` }, signal: AbortSignal.timeout(5000) })
+    const r = await fetch(`http://127.0.0.1:${cfg.port}/control/status`, { headers: { Authorization: `Bearer ${cfg.secret}` }, signal: AbortSignal.timeout(5000) })
     const body = await r.json()
     if (isJsonMode()) printJson(body)
     else info(JSON.stringify(body, null, 2))
@@ -41,18 +41,11 @@ async function run(ctx: Ctx): Promise<number> {
   if (!cfg) throw new DshModelError('bridge_not_configured', L('守护进程未配置，先执行 dsh-cpamc setup', 'Daemon not configured; run dsh-cpamc setup first'))
   const daemon = new Daemon(ctx)
   await daemon.start()
-  log(`daemon: products ${daemon.runtimes.map((r) => r.label).join(', ') || '(none)'}`)
 
-  const server = createBridge({
+  const server = createControlServer({
     port: cfg.port,
     secret: cfg.secret,
-    variants: daemon.runtimes,
     log,
-    onRefresh: async () => {
-      const changed = await daemon.refreshCatalogs()
-      if (changed) await daemon.resync()
-      return { changed }
-    },
     onControl: (method, path, body, query) => daemon.handle(method, path, body, query),
   })
   await server.ready

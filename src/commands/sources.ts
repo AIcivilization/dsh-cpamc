@@ -1,6 +1,6 @@
-// commands/sources.ts — 来源开关与登录（CLI 版；dsh 插件页调同一套守护进程接口）
+// commands/sources.ts — 来源列表、在 dsh 里显示 / 隐藏、命令行备用登录（dsh 插件页调同一套守护进程接口）
 //   dsh-cpamc sources
-//   dsh-cpamc source enable|disable|logout <来源> [--accept-risk]
+//   dsh-cpamc source show|hide|login|logout <来源> [--accept-risk]
 //   dsh-cpamc stats
 
 import { createInterface } from 'node:readline'
@@ -58,21 +58,20 @@ export function pricingTag(s: SourceState): string {
   return t === 'free' ? green(L('免费', 'free')) : t === 'limited' ? yellow(L('免费·额度少', 'free·limited')) : t === 'paid' ? red(L('需付费', 'paid')) : '-'
 }
 
-export async function sources(ctx: Ctx, opts: { all?: boolean } = {}): Promise<number> {
-  // 高风险来源（Claude、Antigravity）默认不列出；已登录的照常显示，方便退出登录
-  const list = (await control<SourceState[]>(ctx, 'GET', '/sources?refresh=1')).filter((s) => opts.all || !s.risky || s.loggedIn)
+export async function sources(ctx: Ctx, _opts: { all?: boolean } = {}): Promise<number> {
+  const list = await control<SourceState[]>(ctx, 'GET', '/sources?refresh=1')
   if (isJsonMode()) {
     printJson(list)
     return 0
   }
   info(
     table([
-      [L('开关', 'On'), L('来源', 'Source'), L('费用', 'Cost'), L('状态', 'State'), L('账号', 'Account'), L('模型', 'Models')],
+      [L('dsh', 'dsh'), L('来源', 'Source'), L('费用', 'Cost'), L('状态', 'State'), L('账号', 'Account'), L('模型', 'Models')],
       ...list.map((s) => [
-        s.enabled ? green('●') : dim('○'),
+        s.shown ? green(L('显示', 'shown')) : dim(L('隐藏', 'hidden')),
         s.id,
         pricingTag(s),
-        s.loggedIn ? (s.usage?.noAccess ? yellow(L('已登录·无订阅', 'signed in · no plan')) : s.enabled ? green(L('已接入', 'connected')) : yellow(L('已登录·关闭', 'signed in · off'))) : dim(s.kind === 'local' ? L('未运行', 'not running') : L('未登录', 'signed out')),
+        s.loggedIn ? (s.usage?.noAccess ? yellow(L('已登录·无可用额度', 'signed in · no quota')) : s.active ? green(L('可用', 'ready')) : yellow(L('已登录·已停用', 'signed in · disabled'))) : dim(L('未登录', 'signed out')),
         s.account ?? (s.detail ? dim(s.detail.slice(0, 40)) : '-'),
         s.models ? String(s.models) : '-',
       ]),
@@ -91,17 +90,17 @@ export async function sources(ctx: Ctx, opts: { all?: boolean } = {}): Promise<n
       for (const line of usageLines(s)) info(line)
     }
   }
-  info(dim(L('\n打开：dsh-cpamc source enable <来源>   关闭：dsh-cpamc source disable <来源>   高风险来源（Claude、Antigravity）：dsh-cpamc sources --all', '\nTurn on: dsh-cpamc source enable <source>   off: dsh-cpamc source disable <source>   High-risk sources (Claude, Antigravity): dsh-cpamc sources --all')))
+  info(dim(L('\n在 dsh 里显示 / 隐藏：dsh-cpamc source show|hide <来源>   登录：dsh 设置 → dsh-cpamc → 全部功能，或 dsh-cpamc panel', '\nShow / hide in dsh: dsh-cpamc source show|hide <source>   Sign in: dsh Settings → dsh-cpamc → All features, or dsh-cpamc panel')))
   return 0
 }
 
 export async function source(ctx: Ctx, sub: string | undefined, id: string | undefined, opts: { acceptRisk?: boolean }): Promise<number> {
-  if (!sub || !id || !['enable', 'disable', 'logout', 'on', 'off'].includes(sub)) {
-    throw new DshModelError('usage', L('用法：dsh-cpamc source enable|disable|logout <来源>', 'Usage: dsh-cpamc source enable|disable|logout <source>'))
+  if (!sub || !id || !['show', 'hide', 'login', 'logout'].includes(sub)) {
+    throw new DshModelError('usage', L('用法：dsh-cpamc source show|hide|login|logout <来源>', 'Usage: dsh-cpamc source show|hide|login|logout <source>'))
   }
-  if (sub === 'disable' || sub === 'off') {
-    await control(ctx, 'POST', `/sources/${id}/disable`)
-    ok(L(`${id} 已关闭（登录保留）`, `${id} turned off (sign-in kept)`))
+  if (sub === 'show' || sub === 'hide') {
+    await control(ctx, 'POST', `/sources/${id}/${sub}`)
+    ok(sub === 'show' ? L(`${id} 的模型会显示在 dsh 里`, `${id} models are shown in dsh`) : L(`${id} 的模型已从 dsh 里隐藏（引擎里的登录与设置不变）`, `${id} models are hidden from dsh (engine sign-in and settings unchanged)`))
     return 0
   }
   if (sub === 'logout') {
@@ -109,21 +108,21 @@ export async function source(ctx: Ctx, sub: string | undefined, id: string | und
     ok(L(`${id} 已退出登录`, `${id} signed out`))
     return 0
   }
-  return enableInteractive(ctx, id, opts)
+  return loginInteractive(ctx, id, opts)
 }
 
-/** 打开一个来源；需要登录就在终端里完成（打印链接 / 码，回调式等你贴回地址） */
-export async function enableInteractive(ctx: Ctx, id: string, opts: { acceptRisk?: boolean } = {}): Promise<number> {
-  const r = await control<{ enabled: boolean; login?: LoginSession; riskNotice?: string }>(ctx, 'POST', `/sources/${id}/enable`, { acceptRisk: Boolean(opts.acceptRisk) })
+/** 命令行登录；在终端里完成（打印链接 / 码，回调式等你贴回地址） */
+export async function loginInteractive(ctx: Ctx, id: string, opts: { acceptRisk?: boolean } = {}): Promise<number> {
+  const r = await control<{ loggedIn: boolean; login?: LoginSession; riskNotice?: string }>(ctx, 'POST', `/sources/${id}/login`, { acceptRisk: Boolean(opts.acceptRisk) })
   if (r.riskNotice) {
     info(r.riskNotice)
     return 2
   }
-  if (r.enabled) {
-    ok(L(`${id} 已接入`, `${id} connected`))
+  if (r.loggedIn) {
+    ok(L(`${id} 已登录`, `${id} already signed in`))
     return 0
   }
-  if (!r.login) throw new DshModelError('enable_failed', L(`${id} 没能打开`, `Could not turn on ${id}`))
+  if (!r.login) throw new DshModelError('login_failed', L(`${id} 没能开始登录`, `Could not start ${id} sign-in`))
   return runLogin(ctx, id, r.login)
 }
 
@@ -152,7 +151,7 @@ async function runLogin(ctx: Ctx, id: string, s: LoginSession): Promise<number> 
       await new Promise((r) => setTimeout(r, 2000))
       const st = await control<LoginSession>(ctx, 'GET', `/login/${s.id}`)
       if (st.status === 'ok') {
-        ok(L(`${id} 已登录并接入`, `${id} signed in and connected`))
+        ok(L(`${id} 已登录`, `${id} signed in`))
         return 0
       }
       if (st.status === 'error' || st.status === 'cancelled') {

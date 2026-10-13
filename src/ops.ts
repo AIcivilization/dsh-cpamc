@@ -2,15 +2,13 @@
 
 import type { Ctx } from './context.js'
 import { connectDshGroups, type DshGroup } from './dsh/connect.js'
-import { listModels, waitHealthy, waitModelsChange, type ModelEntry } from './engine/client.js'
-import { compatModelIndex, loadCompatUpstreams } from './engine/compat.js'
+import { listModels, waitModelsChange } from './engine/client.js'
 import { subscriptionMap } from './engine/sourcemap.js'
 import { pickedFor } from './dsh/pick.js'
 import { writeEngineConfig } from './engine/config.js'
 import { DshModelError, isDshModelError } from './errors.js'
 import { L } from './i18n.js'
 import { DSH_KEY_NAME, findActive, loadKeys, type KeyStore } from './keys.js'
-import { serviceFor } from './service/index.js'
 import { loadConfig, loadState, saveConfig, saveState, type Config, type State } from './state.js'
 import { ok, skip, warn } from './util/output.js'
 
@@ -36,28 +34,9 @@ export function dshKey(keys: KeyStore): string {
   return k.key
 }
 
-/**
- * 写 engine.yaml；内容变了且服务已注册，就重启引擎并等它起来。
- * 不能指望引擎的热重载：我们原子写（临时文件 + rename）会换掉文件 inode，
- * Linux 上引擎的 fsnotify 盯着旧 inode，收不到变化（VPS 实测：写入后引擎一直是 0 个 OpenAI-compat）。
- */
+/** 写 engine.yaml（内容变了才写，引擎热重载）。返回是否写了 */
 export async function applyEngineConfig(ctx: Ctx, all: All): Promise<boolean> {
   return writeEngineConfig(ctx, all.config, all.keys)
-}
-
-/**
- * 兜底重启：热重载没生效时用。vps 模式下 bridge 以 dsh 用户运行，没有权限重启系统服务——
- * 这时只记警告不失败（实测：bridge 写完配置后 systemctl restart 被拒）。
- */
-async function restartEngineBestEffort(ctx: Ctx, all: All): Promise<boolean> {
-  if (ctx.serviceDisabled || !all.state.service) return false
-  try {
-    await serviceFor(ctx).restart()
-    return waitHealthy(all.config.port, 15_000)
-  } catch (error) {
-    warn(L(`没能重启引擎（${isDshModelError(error) ? error.code : String(error)}）；稍后执行 dsh-cpamc repair`, `Could not restart the engine (${isDshModelError(error) ? error.code : String(error)}); run dsh-cpamc repair later`))
-    return false
-  }
 }
 
 /**
@@ -72,7 +51,7 @@ export async function syncModels(ctx: Ctx, all: All, opts: { before?: string[]; 
   // 每个来源只把挑中的模型写进 dsh（管理页勾选，或默认挑选）；统一端点照常提供全部
   const groups: DshGroup[] = []
   for (const c of candidates.values()) {
-    const picked = new Set(pickedFor(c.models.map((m) => ({ id: m.id, name: m.name, rate: m.rate })), all.config.dshCpamcs?.[c.source]))
+    const picked = new Set(pickedFor(c.models.map((m) => ({ id: m.id, name: m.name, rate: m.rate })), all.config.dshModels?.[c.source]))
     const models = c.models.filter((m) => picked.has(m.id)).map(({ rate: _r, ...m }) => m)
     if (models.length) groups.push({ providerId: c.providerId, displayName: c.label, models })
   }
@@ -108,7 +87,7 @@ export async function syncModels(ctx: Ctx, all: All, opts: { before?: string[]; 
 }
 
 export interface DshCandidate {
-  /** 来源 id（workbuddy / workbuddy-ai / opencode / codex …；归不了类的是 "other"） */
+  /** 来源 id（workbuddy / trae / qoder / zcode / claude / codex） */
   source: string
   providerId: string
   label: string
@@ -117,75 +96,25 @@ export interface DshCandidate {
 
 /**
  * 每个来源可以放进 dsh 的全部模型（勾选列表也用它）。
- * 订阅模型名后缀"· 订阅"；已登录但没有可用订阅的来源（如 Kimi 没有 Kimi Code 套餐）不算，免得选了就报错。
+ * 隐藏的来源、已登录但没有可用额度的来源不算；归不到六个来源的模型（在完整管理界面里另加的）暂不放进 dsh。
  */
 export async function dshCandidates(ctx: Ctx, all: All, ids?: string[]): Promise<Map<string, DshCandidate>> {
   const list = ids ?? (await listModels(all.config.port, dshKey(all.keys))).map((m) => m.id)
-  const meta = compatModelIndex(await loadCompatUpstreams(ctx))
   const subs = await subscriptionMap(ctx, all.config.port)
+  const hidden = new Set(all.config.hiddenSources ?? [])
   const out = new Map<string, DshCandidate>()
-  const push = (source: string, providerId: string, label: string, model: DshCandidate['models'][number]) => {
-    let g = out.get(source)
-    if (!g) out.set(source, (g = { source, providerId, label, models: [] }))
-    g.models.push(model)
-  }
   for (const id of list) {
-    const m = meta.get(id)
-    if (m?.group) {
-      push(m.group, `dsh-cpamc-${m.group}`, m.groupLabel ?? m.group, {
-        id,
-        name: m.dshName ?? m.displayName ?? id,
-        ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
-        ...(m.maxTokens ? { maxTokens: m.maxTokens } : {}),
-        input: m.image ? ['text', 'image'] : ['text'],
-        ...(m.rate !== undefined ? { rate: m.rate } : {}),
-      })
-      continue
-    }
     const s = subs.models.get(id)
-    if (s && subs.noAccess.has(s.source)) continue
-    if (s) push(s.source, `dsh-cpamc-${s.source}`, s.label, { id, name: `${s.displayName ?? id} · ${L('订阅', 'subscription')}` })
-    else push('other', all.config.dsh.providerId, L('订阅（dsh-cpamc）', 'Subscriptions (dsh-cpamc)'), { id, name: id })
+    if (!s || subs.noAccess.has(s.source) || hidden.has(s.source)) continue
+    let g = out.get(s.source)
+    if (!g) out.set(s.source, (g = { source: s.source, providerId: `dsh-cpamc-${s.source}`, label: s.label, models: [] }))
+    g.models.push({ id, name: s.displayName ?? id })
   }
   return out
 }
 
-/** 引擎里带前缀（opencode/ workbuddy/ workbuddy-ai/）的模型是否正好等于期望：不能缺，也不能多（关掉的来源要消失） */
-function aliasesMatch(models: ModelEntry[], expected: string[]): boolean {
-  const want = new Set(expected)
-  const prefixes = ['opencode/', 'workbuddy/', 'workbuddy-ai/', 'ollama/', 'lmstudio/']
-  const have = models.map((m) => m.id).filter((id) => prefixes.some((p) => id.startsWith(p)))
-  return have.length === want.size && have.every((id) => want.has(id))
-}
-
-/** 等引擎热重载后模型列表与期望一致（openai-compatibility 上游改动之后），最多 timeoutMs */
-async function waitForAliases(port: number, key: string, expected: string[], timeoutMs = 6000): Promise<ModelEntry[]> {
-  const deadline = Date.now() + timeoutMs
-  let last: ModelEntry[] = []
-  while (Date.now() < deadline) {
-    try {
-      last = await listModels(port, key)
-      if (aliasesMatch(last, expected)) return last
-    } catch {
-      // 重载中
-    }
-    await new Promise((r) => setTimeout(r, 300))
-  }
-  return last
-}
-
-/**
- * 全量同步：按当前的 OpenCode key / WorkBuddy 目录重写 engine.yaml → 等引擎加载 → 把模型清单写进 dsh。
- * setup、opencode key、bridge 发现目录变化时都走这里。
- */
+/** 全量同步：写 engine.yaml（引擎热重载）→ 把模型清单写进 dsh。setup、key 变化、来源显示 / 隐藏、凭据变化时都走这里 */
 export async function syncAll(ctx: Ctx, all: All, opts: { quiet?: boolean } = {}): Promise<string[]> {
   await applyEngineConfig(ctx, all)
-  const expected = [...compatModelIndex(await loadCompatUpstreams(ctx)).keys()]
-  const key = dshKey(all.keys)
-  // 不看"这次有没有写文件"，而看引擎实际加载的模型是否与期望一致：别的进程可能已经写过同样的内容（VPS 实测），
-  // 关掉一个来源时也要等它的模型真的消失，才把清单写进 dsh
-  if (!aliasesMatch(await waitForAliases(all.config.port, key, expected, 8000), expected) && (await restartEngineBestEffort(ctx, all))) {
-    await waitForAliases(all.config.port, key, expected, 8000)
-  }
   return syncModels(ctx, all, { quiet: opts.quiet })
 }

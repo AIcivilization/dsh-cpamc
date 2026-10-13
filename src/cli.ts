@@ -12,14 +12,11 @@ import { doctor, status } from './commands/status.js'
 import { uninstall } from './commands/uninstall.js'
 import { adminRun, selfUpdate } from './commands/self.js'
 import { supervise } from './service/windows.js'
-import { opencode } from './commands/opencode.js'
-import { workbuddy } from './commands/workbuddy.js'
 import { bridge } from './commands/bridge.js'
-import { enableInteractive, source, sources, stats } from './commands/sources.js'
+import { loginInteractive, source, sources, stats } from './commands/sources.js'
 import { createContext } from './context.js'
 import { isDshModelError } from './errors.js'
 import { L, initLang } from './i18n.js'
-import { UPSTREAMS } from './upstreams.js'
 import { dim, fail, isJsonMode, printJson, setJsonMode } from './util/output.js'
 import { pkgVersion } from './util/pkg.js'
 
@@ -45,32 +42,24 @@ const OPTIONS = {
   lines: { type: 'string' },
   proxy: { type: 'string' },
   bridge: { type: 'boolean' },
-  'skip-opencode': { type: 'boolean' },
-  'skip-workbuddy': { type: 'boolean' },
   'skip-dsh-plugin': { type: 'boolean' },
-  stdin: { type: 'boolean' },
-  'skip-verify': { type: 'boolean' },
   to: { type: 'string' },
   'remove-plugin': { type: 'boolean' },
 } as const
 
 function help(): string {
-  const ups = UPSTREAMS.map((u) => u.id).join('|')
   return L(
-    `dsh-cpamc ${pkgVersion()} — 把你自己的 CLI 订阅接进 dsh（本机 OpenAI 兼容端点，默认鉴权，可干净卸载）
+    `dsh-cpamc ${pkgVersion()} — 为 dsh 提供模型：WorkBuddy、Trae、Qoder、ZCode 与 Claude / Codex 订阅（本机 OpenAI 兼容端点，默认鉴权，可干净卸载）
 
 用法：dsh-cpamc <命令> [选项]
 
-  setup [--profile P] [--proxy URL|none] [--skip-opencode] [--skip-workbuddy]
-                                       一键安装统一端点，接入 OpenCode Zen（你的 key）与 WorkBuddy（自有 bridge），并接进 dsh；可重复执行
-  opencode [status|key|remove] [--stdin] [--skip-verify]
-                                       OpenCode Zen：设置 / 更换 key，或移除
-  workbuddy [status|login [cn|ai]|logout [cn|ai]|enable|refresh|disable]
-                                       WorkBuddy：桌面 App 登录态，或 login 打印链接、在任意浏览器授权（服务器可用）
-  sources                              来源列表：开关、登录状态、账号、模型数
-  source enable|disable|logout <来源> [--accept-risk]
-                                       打开（未登录就打印链接登录）/ 关闭（保留登录）/ 退出登录
-  login <来源> / logout <来源>          同 source enable / source logout
+  setup [--profile P] [--proxy URL|none]
+                                       一键安装：引擎、渠道插件、完整管理界面，接进 dsh；可重复执行
+  sources                              六个来源：登录状态、在 dsh 里显示还是隐藏、账号、模型数
+  source show|hide <来源>               在 dsh 里显示 / 隐藏这个来源的模型（不改引擎里的设置）
+  login <来源> [--accept-risk] / logout <来源>
+                                       命令行登录 / 退出登录（平时请在「全部功能」里登录）
+  panel                                打印完整管理界面的地址，并复制登录密钥
   stats                                按 key / 来源 / 模型的成功率、延迟、速度
   status                               一屏总览
   doctor [--e2e] [--all] [--model M]   逐项自检；--e2e 实测流式与工具调用
@@ -89,20 +78,17 @@ function help(): string {
 
 通用选项：--lang zh|en  --json  --help  --version
 环境变量：DSH_HOME、DSH_CPAMC_HOME、DSH_CPAMC_LANG`,
-    `dsh-cpamc ${pkgVersion()} — wire your own CLI subscriptions into dsh (local OpenAI-compatible endpoint, auth by default, clean uninstall)
+    `dsh-cpamc ${pkgVersion()} — models for dsh: WorkBuddy, Trae, Qoder, ZCode and your Claude / Codex subscriptions (local OpenAI-compatible endpoint, auth by default, clean uninstall)
 
 Usage: dsh-cpamc <command> [options]
 
-  setup [--profile P] [--proxy URL|none] [--skip-opencode] [--skip-workbuddy]
-                                       Install the unified endpoint, connect OpenCode Zen (your key) and WorkBuddy (own bridge), wire into dsh; idempotent
-  opencode [status|key|remove] [--stdin] [--skip-verify]
-                                       OpenCode Zen: set / change the key, or remove
-  workbuddy [status|login [cn|ai]|logout [cn|ai]|enable|refresh|disable]
-                                       WorkBuddy: desktop app sign-in, or login prints a link to approve in any browser (works on servers)
-  sources                              Sources: switch, sign-in state, account, models
-  source enable|disable|logout <source> [--accept-risk]
-                                       Turn on (prints a login link if needed) / off (keeps sign-in) / sign out
-  login <source> / logout <source>     Same as source enable / source logout
+  setup [--profile P] [--proxy URL|none]
+                                       Install the engine, channel plugins and the full management interface, wire into dsh; idempotent
+  sources                              The six sources: sign-in state, shown or hidden in dsh, account, models
+  source show|hide <source>            Show / hide this source's models in dsh (engine settings are not touched)
+  login <source> [--accept-risk] / logout <source>
+                                       Sign in / out from the command line (normally sign in under All features)
+  panel                                Print the full management interface address and copy its sign-in key
   stats                                Success rate, latency and speed by key / source / model
   status                               Overview
   doctor [--e2e] [--all] [--model M]   Health checks; --e2e tests streaming and tool calls
@@ -151,17 +137,13 @@ export async function main(argv: string[]): Promise<number> {
     if (port !== undefined && !(Number.isInteger(port) && port > 0 && port < 65536)) throw new Error(L(`端口不合法：${o.port}`, `Invalid port: ${o.port}`))
     switch (cmd) {
       case 'setup':
-        return await setup(ctx, { port, profile: o.profile, force: o.force, proxy: o.proxy, skipOpencode: o['skip-opencode'], skipWorkbuddy: o['skip-workbuddy'], skipDshPlugin: o['skip-dsh-plugin'] })
-      case 'opencode':
-        return await opencode(ctx, a1, { stdin: o.stdin, skipVerify: o['skip-verify'] })
-      case 'workbuddy':
-        return await workbuddy(ctx, a1, a2)
+        return await setup(ctx, { port, profile: o.profile, force: o.force, proxy: o.proxy, skipDshPlugin: o['skip-dsh-plugin'] })
       case 'bridge':
         return await bridge(ctx, a1)
       case 'login':
         // 统一走守护进程：链接 + 码 / 贴回跳转地址，服务器上不需要浏览器（设计 §14.2）
         if (!a1) throw new Error(L('用法：dsh-cpamc login <来源>（dsh-cpamc sources 查看）', 'Usage: dsh-cpamc login <source> (see dsh-cpamc sources)'))
-        return await enableInteractive(ctx, a1, { acceptRisk: o['accept-risk'] })
+        return await loginInteractive(ctx, a1, { acceptRisk: o['accept-risk'] })
       case 'logout':
         if (!a1) throw new Error(L('用法：dsh-cpamc logout <来源>', 'Usage: dsh-cpamc logout <source>'))
         return await source(ctx, 'logout', a1, {})

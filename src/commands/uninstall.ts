@@ -14,7 +14,6 @@ import { serviceFor } from '../service/index.js'
 import { exists, timestamp } from '../util/fs.js'
 import { fail, info, ok, warn } from '../util/output.js'
 import { disable as disableRemote } from './remote.js'
-import { disableWorkbuddy, removeWorkbuddyPlugin } from '../integrations/workbuddy.js'
 import { removeDshPlugin } from '../integrations/dshplugin.js'
 import { removeAdmin } from '../service/admin.js'
 
@@ -37,7 +36,7 @@ export async function uninstall(ctx: Ctx, opts: { yes?: boolean; keepAuth?: bool
   const all = await loadAll(ctx)
   const authCount = (await listAuthFiles(ctx)).length
   if (!opts.yes) {
-    info(L('将要：关闭远程访问 → 移除 WorkBuddy bridge → 还原 dsh 配置 → 移除引擎服务 → 删除 ' + ctx.paths.home + '（含 OpenCode key 与 WorkBuddy 令牌副本）', 'This will: disable remote access → remove the WorkBuddy bridge → restore dsh config → remove the engine service → delete ' + ctx.paths.home + ' (incl. the OpenCode key and WorkBuddy token copies)'))
+    info(L('将要：关闭远程访问 → 还原 dsh 配置 → 移除守护进程与引擎服务 → 删除 ' + ctx.paths.home + '（含各来源的登录凭据）', 'This will: disable remote access → restore dsh config → remove the daemon and engine services → delete ' + ctx.paths.home + ' (incl. source sign-in credentials)'))
     if (authCount && !opts.keepAuth) info(L(`其中包括 ${authCount} 个上游登录凭据（加 --keep-auth 可先备份出来）`, `including ${authCount} upstream login credentials (add --keep-auth to back them up first)`))
     if (!(await confirm(L('确认卸载？', 'Proceed with uninstall?')))) {
       info(L('已取消', 'Cancelled'))
@@ -61,9 +60,11 @@ export async function uninstall(ctx: Ctx, opts: { yes?: boolean; keepAuth?: bool
   await step('dsh-plugin', async () => {
     if (await removeDshPlugin(ctx, all, { force: opts.removePlugin })) ok(L('已从 dsh 移除 dsh-cpamc 插件', 'Removed the dsh-cpamc plugin from dsh'))
   })
-  await step('workbuddy', async () => {
-    if (await removeWorkbuddyPlugin(ctx, all)) ok(L('已移除上一版安装的 WorkBuddy 插件', 'Removed the WorkBuddy plugin installed by a previous version'))
-    if (await disableWorkbuddy(ctx, all)) ok(L('WorkBuddy bridge 服务已移除', 'WorkBuddy bridge service removed'))
+  await step('daemon', async () => {
+    if (ctx.serviceDisabled || (!all.state.bridgeService && !all.config.bridge)) return
+    await serviceFor(ctx, 'bridge', all.config.proxy).uninstall()
+    delete all.state.bridgeService
+    ok(L('守护进程服务已移除', 'Daemon service removed'))
   })
   await step('dsh', async () => {
     if (!all.state.dsh) return

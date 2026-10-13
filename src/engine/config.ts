@@ -9,7 +9,6 @@ import { L } from '../i18n.js'
 import { activeKeys, type KeyStore } from '../keys.js'
 import type { Config } from '../state.js'
 import { readText, writeInPlace } from '../util/fs.js'
-import { loadCompatUpstreams, renderCompat, type CompatUpstream } from './compat.js'
 import { ensureMgmt } from './mgmt.js'
 
 const HEADER = [
@@ -17,7 +16,7 @@ const HEADER = [
   '# 由 dsh-cpamc 生成，请勿手改。需要重新生成请执行 `dsh-cpamc setup`。',
 ].join('\n')
 
-export function renderEngineConfig(ctx: Ctx, config: Config, keys: KeyStore, port = config.port, compat: CompatUpstream[] = [], mgmtSecret = ''): string {
+export function renderEngineConfig(ctx: Ctx, config: Config, keys: KeyStore, port = config.port, mgmtSecret = ''): string {
   const apiKeys = activeKeys(keys).map((k) => k.key)
   if (apiKeys.length === 0) {
     throw new DshModelError('no_api_keys', L('没有可用的 key，拒绝生成引擎配置（空 key 列表会让引擎不做鉴权）', 'No active keys; refusing to write engine config (an empty key list disables engine auth)'))
@@ -31,7 +30,6 @@ export function renderEngineConfig(ctx: Ctx, config: Config, keys: KeyStore, por
     oauth: { 'auth-dir': ctx.paths.auth },
     routing: { strategy: 'fill-first' },
     ...(config.proxy ? { requests: { 'proxy-url': config.proxy } } : {}),
-    ...(compat.length ? { 'api-keys': { 'openai-compatibility': renderCompat(compat) } } : {}),
     observability: {
       logs: { 'logging-to-file': true, 'logs-max-total-size-mb': 50, 'request-log': false },
       // 用量记录给守护进程统计 key / 来源 / 模型的速度与稳定性；它每 5 秒取一次，保留 10 分钟足够兜住停顿
@@ -44,7 +42,7 @@ export function renderEngineConfig(ctx: Ctx, config: Config, keys: KeyStore, por
 /** 写 engine.yaml；内容没变就不动（避免引擎无谓的热重载）。返回是否写了 */
 export async function writeEngineConfig(ctx: Ctx, config: Config, keys: KeyStore): Promise<boolean> {
   const mgmt = await ensureMgmt(ctx)
-  const text = renderEngineConfig(ctx, config, keys, config.port, await loadCompatUpstreams(ctx), mgmt.secret)
+  const text = renderEngineConfig(ctx, config, keys, config.port, mgmt.secret)
   if ((await readText(ctx.paths.engineYaml)) === text) return false
   // 原地写：保留 inode，让引擎（含 Linux）的 fsnotify 能收到变化并热重载，谁写都行、不用重启
   await writeInPlace(ctx.paths.engineYaml, text, { owner: ctx.owner })

@@ -1,7 +1,7 @@
 // commands/status.ts — status（一屏总览）与 doctor（逐项检查，--e2e 实测每个模型）
 
 import { join } from 'node:path'
-import { availableVariants, bridgeConfigPath, loadBridgeConfig, loadCatalogs } from '../bridge/runtime.js'
+import { bridgeConfigPath, bridgeHealthy, loadBridgeConfig } from '../daemon/runtime.js'
 import type { Ctx } from '../context.js'
 import { anyProviderPresent } from '../dsh/connect.js'
 import { KEY_REF, readRef } from '../dsh/credentials.js'
@@ -9,25 +9,13 @@ import { listAuthFiles, summarize } from '../engine/auth.js'
 import { healthy, listModels, probeStream, probeToolCall, unauthStatus, type ModelEntry } from '../engine/client.js'
 import { currentBinary, currentVersion } from '../engine/install.js'
 import { L } from '../i18n.js'
-import { opencodeConfigured } from '../integrations/opencode.js'
-import { bridgeHealthy, userPluginInstalled } from '../integrations/workbuddy.js'
 import { findActive, DSH_KEY_NAME } from '../keys.js'
 import { loadAll } from '../ops.js'
 import { serviceFor } from '../service/index.js'
-import { UPSTREAMS } from '../upstreams.js'
+import { SOURCES } from '../sources.js'
 import { exists, fileMode, readText, sha256 } from '../util/fs.js'
 import { dim, green, info, isJsonMode, printJson, red, table, yellow } from '../util/output.js'
 import { proxyReachable, redactProxy } from '../util/proxy.js'
-
-/** 模型 id 的分组：opencode/… workbuddy/… 其余算订阅 */
-function groupCounts(models: ModelEntry[]): Map<string, number> {
-  const g = new Map<string, number>()
-  for (const m of models) {
-    const k = m.id.includes('/') ? m.id.split('/')[0]! : 'subscription'
-    g.set(k, (g.get(k) ?? 0) + 1)
-  }
-  return g
-}
 
 export async function status(ctx: Ctx): Promise<number> {
   const all = await loadAll(ctx)
@@ -37,23 +25,18 @@ export async function status(ctx: Ctx): Promise<number> {
   const svc = engineInstalled && !ctx.serviceDisabled ? await serviceFor(ctx).status() : null
   const up = engineInstalled ? await healthy(all.config.port) : false
   const models = up && key ? await listModels(all.config.port, key).catch(() => [] as ModelEntry[]) : []
-  const groups = groupCounts(models)
   const { byUpstream } = summarize(await listAuthFiles(ctx))
   const dshOk = await anyProviderPresent(all.state).catch(() => false)
-  const oc = await opencodeConfigured(ctx)
   const bridgeCfg = await loadBridgeConfig(ctx.paths.home)
   const bridgeUp = bridgeCfg ? await bridgeHealthy(bridgeCfg.port, bridgeCfg.secret) : false
-  const cats = await loadCatalogs(ctx.paths.home)
-  const apps = await availableVariants(ctx.paths.home)
-  const logged = UPSTREAMS.filter((u) => byUpstream[u.id]?.length).map((u) => u.id)
+  const logged = SOURCES.filter((u) => byUpstream[u.id]?.length).map((u) => u.id)
 
   const data = {
     mode: ctx.mode,
     home: ctx.paths.home,
-    endpoint: { version, running: up, port: all.config.port, service: svc, models: Object.fromEntries(groups) },
-    opencode: { configured: oc, models: groups.get('opencode') ?? 0 },
-    workbuddy: { apps: apps.map((v) => v.displayName), bridge: bridgeCfg ? { port: bridgeCfg.port, running: bridgeUp } : null, catalogs: cats.map((c) => ({ label: c.label, signedIn: c.signedIn, models: c.models.length, error: c.error })) },
-    subscriptions: logged,
+    endpoint: { version, running: up, port: all.config.port, service: svc, models: models.length },
+    daemon: bridgeCfg ? { port: bridgeCfg.port, running: bridgeUp } : null,
+    sources: { signedIn: logged, hidden: all.config.hiddenSources ?? [] },
     dsh: all.state.dsh ? { profile: all.state.dsh.profile, providerPresent: dshOk } : null,
     remote: all.config.remote.mode,
     proxy: all.config.proxy ? redactProxy(all.config.proxy) : null,
@@ -64,20 +47,12 @@ export async function status(ctx: Ctx): Promise<number> {
     return 0
   }
   const yes = (b: boolean, t: string, f: string) => (b ? green(t) : red(f))
-  const wbLine = !apps.length
-    ? dim(L('未登录（dsh-cpamc workbuddy login）', 'not signed in (dsh-cpamc workbuddy login)'))
-    : !bridgeCfg
-      ? yellow(L('未启用（dsh-cpamc workbuddy enable）', 'not enabled (dsh-cpamc workbuddy enable)'))
-      : !bridgeUp
-        ? red(L(`bridge 没在运行（127.0.0.1:${bridgeCfg.port}，dsh-cpamc repair）`, `bridge not running (127.0.0.1:${bridgeCfg.port}, dsh-cpamc repair)`))
-        : cats.map((c) => (c.signedIn ? green(`${c.label} ${c.models.length}`) : yellow(L(`${c.label} 未登录`, `${c.label} signed out`)))).join(' · ') || yellow(L('目录还没读到', 'catalog not read yet'))
   info(
     table([
-      [L('统一端点', 'Endpoint'), engineInstalled ? yes(up, `127.0.0.1:${all.config.port}`, L('未运行（dsh-cpamc repair）', 'not running (dsh-cpamc repair)')) + dim(`  v${version ?? '-'}${svc ? ` · ${svc.detail ?? '-'}` : ''}`) : red(L('未安装（dsh-cpamc setup）', 'not installed (dsh-cpamc setup)'))],
-      [L('模型', 'Models'), models.length ? [...groups].map(([g, n]) => `${g === 'subscription' ? L('订阅', 'subscription') : g} ${n}`).join(' · ') : yellow('0')],
-      ['OpenCode Zen', oc ? green(L(`已配置 · ${groups.get('opencode') ?? 0} 个模型`, `configured · ${groups.get('opencode') ?? 0} models`)) : yellow(L('未配置（dsh-cpamc opencode key）', 'not configured (dsh-cpamc opencode key)'))],
-      ['WorkBuddy', wbLine],
-      [L('订阅', 'Subscriptions'), logged.length ? logged.join(', ') : dim(L('无（dsh-cpamc login <上游>）', 'none (dsh-cpamc login <upstream>)'))],
+      [L('模型服务', 'Model service'), engineInstalled ? yes(up, `127.0.0.1:${all.config.port}`, L('未运行（dsh-cpamc repair）', 'not running (dsh-cpamc repair)')) + dim(`  v${version ?? '-'}${svc ? ` · ${svc.detail ?? '-'}` : ''}`) : red(L('未安装（dsh-cpamc setup）', 'not installed (dsh-cpamc setup)'))],
+      [L('守护进程', 'Daemon'), bridgeCfg ? yes(bridgeUp, `127.0.0.1:${bridgeCfg.port}`, L('未运行（dsh-cpamc repair）', 'not running (dsh-cpamc repair)')) : yellow(L('未配置（dsh-cpamc setup）', 'not configured (dsh-cpamc setup)'))],
+      [L('模型', 'Models'), models.length ? String(models.length) : yellow('0')],
+      [L('已登录来源', 'Signed-in sources'), logged.length ? logged.join(', ') : dim(L('无（在「全部功能」里登录，或 dsh-cpamc panel）', 'none (sign in under All features, or dsh-cpamc panel)'))],
       ['dsh', data.dsh ? yes(dshOk, `${data.dsh.profile} ✓`, L(`${data.dsh.profile}：provider 不在了（dsh-cpamc repair）`, `${data.dsh.profile}: provider missing (dsh-cpamc repair)`)) : yellow(L('未接入', 'not connected'))],
       [L('远程访问', 'Remote'), all.config.remote.mode],
       [L('出站代理', 'Proxy'), data.proxy ?? L('不使用', 'none')],
@@ -104,7 +79,7 @@ export async function doctor(ctx: Ctx, opts: { e2e?: boolean; all?: boolean; mod
   if (homeMode == null) add('home', 'fail', L(`${ctx.paths.home} 不存在（先 setup）`, `${ctx.paths.home} missing (run setup)`))
   else add('home', homeMode & 0o077 ? 'warn' : 'ok', L(`home 权限 ${homeMode.toString(8)}`, `home mode ${homeMode.toString(8)}`))
 
-  for (const [id, file] of [['keys', ctx.paths.keys], ['engine-yaml', ctx.paths.engineYaml], ['secrets', join(ctx.paths.home, 'secrets.json')], ['bridge-config', bridgeConfigPath(ctx.paths.home)]] as const) {
+  for (const [id, file] of [['keys', ctx.paths.keys], ['engine-yaml', ctx.paths.engineYaml], ['mgmt', join(ctx.paths.home, 'mgmt.json')], ['bridge-config', bridgeConfigPath(ctx.paths.home)]] as const) {
     const m = await fileMode(file)
     if (m != null) add(id, m & 0o077 ? 'warn' : 'ok', `${file.split('/').pop()} ${m.toString(8)}`)
   }
@@ -139,36 +114,21 @@ export async function doctor(ctx: Ctx, opts: { e2e?: boolean; all?: boolean; mod
   if (up && key) {
     try {
       models = await listModels(all.config.port, key)
-      const g = groupCounts(models)
-      add('models', models.length ? 'ok' : 'warn', models.length ? [...g].map(([k, n]) => `${k} ${n}`).join(' · ') : L('0 个模型', '0 models'))
+      add('models', models.length ? 'ok' : 'warn', models.length ? L(`${models.length} 个模型`, `${models.length} models`) : L('0 个模型（还没有来源登录）', '0 models (no source signed in yet)'))
     } catch (error) {
       add('models', 'fail', String((error as Error).message))
     }
   }
 
-  // —— OpenCode / WorkBuddy ——
-  const oc = await opencodeConfigured(ctx)
-  const ocModels = models.filter((m) => m.id.startsWith('opencode/')).length
-  add('opencode', !oc ? 'warn' : up && !ocModels ? 'fail' : 'ok', !oc ? L('OpenCode Zen 未配置（dsh-cpamc opencode key）', 'OpenCode Zen not configured (dsh-cpamc opencode key)') : up && !ocModels ? L('已配置但引擎里没有 opencode/ 模型（dsh-cpamc repair）', 'configured but no opencode/ models in the engine (dsh-cpamc repair)') : L(`OpenCode Zen：${ocModels} 个模型`, `OpenCode Zen: ${ocModels} models`))
-  const apps = await availableVariants(ctx.paths.home)
+  // —— 守护进程 ——
   const bridgeCfg = await loadBridgeConfig(ctx.paths.home)
-  // 守护进程（来源开关、登录、统计、WorkBuddy 转发）总要在跑；只有刻意跳过系统服务时不查
+  // 守护进程（来源状态、key、统计、页面上的更新卸载）总要在跑；只有刻意跳过系统服务时不查
   if (!ctx.serviceDisabled) {
     if (!bridgeCfg) add('daemon', 'fail', L('守护进程没配置（dsh-cpamc setup）', 'Daemon not configured (dsh-cpamc setup)'))
     else {
       const bUp = await bridgeHealthy(bridgeCfg.port, bridgeCfg.secret)
       add('daemon', bUp ? 'ok' : 'fail', bUp ? L(`守护进程 127.0.0.1:${bridgeCfg.port} 运行中`, `daemon 127.0.0.1:${bridgeCfg.port} running`) : L('守护进程没在运行（dsh-cpamc logs --bridge；dsh-cpamc repair）', 'daemon not running (dsh-cpamc logs --bridge; dsh-cpamc repair)'))
     }
-  }
-  if (apps.length && bridgeCfg) {
-    {
-      for (const c of await loadCatalogs(ctx.paths.home)) {
-        const inEngine = models.filter((m) => m.id.startsWith(`${c.prefix}/`)).length
-        if (!c.signedIn) add(`workbuddy-${c.key}`, 'warn', L(`${c.label}：未登录${c.error ? `（${c.error}）` : ''}——在 App 里登录后执行 dsh-cpamc workbuddy refresh`, `${c.label}: signed out${c.error ? ` (${c.error})` : ''} — sign in to the app, then dsh-cpamc workbuddy refresh`))
-        else add(`workbuddy-${c.key}`, up && !inEngine ? 'fail' : 'ok', L(`${c.label}：已登录，${c.models.length} 个模型${up ? `（引擎里 ${inEngine} 个）` : ''}${c.error ? `；${c.error}` : ''}`, `${c.label}: signed in, ${c.models.length} models${up ? ` (${inEngine} in engine)` : ''}${c.error ? `; ${c.error}` : ''}`))
-      }
-    }
-    if (await userPluginInstalled(ctx, all)) add('workbuddy-plugin', 'warn', L('同时装了 dsh-workbuddy-connect 插件：dsh 里会有两组 WorkBuddy 模型', 'dsh-workbuddy-connect is also installed: dsh shows two WorkBuddy groups'))
   }
 
   // —— dsh 接线 ——

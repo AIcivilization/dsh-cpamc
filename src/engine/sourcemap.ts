@@ -1,7 +1,7 @@
-// engine/sourcemap.ts — 引擎原生（订阅）模型属于哪个来源
+// engine/sourcemap.ts — 引擎里的模型属于哪个来源
 //
-// /v1/models 里订阅模型没有前缀（如 kimi-k2.6，owned_by=moonshot），靠管理接口
-// GET /credentials/models?name= 逐个凭据取它能服务的模型，映射回来源（kimi / codex / claude …）。
+// /v1/models 不说明模型来自哪个来源（owned_by 可能为空），只能靠管理接口
+// GET /credentials/models?name= 逐个凭据取它能服务的模型，映射回来源（workbuddy / trae / … / claude / codex）。
 // 同时给出"没有可用订阅"的来源：用量接口判定的 noAccess，或引擎记录的 payment_required 冷却。
 
 import type { Ctx } from '../context.js'
@@ -39,7 +39,7 @@ export async function subscriptionMap(ctx: Ctx, port: number): Promise<Subscript
   } catch {
     return { models, noAccess }
   }
-  for (const def of SOURCES.filter((s) => s.kind === 'engine')) {
+  for (const def of SOURCES) {
     const mine = credsFor(creds, def).filter((c) => !c.disabled)
     if (mine.length && mine.every(paymentRequired)) noAccess.add(def.id)
     for (const c of mine) {

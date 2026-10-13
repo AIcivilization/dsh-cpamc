@@ -60,7 +60,7 @@ describe.skipIf(process.platform !== 'win32')('windows end to end (real backgrou
 
   it('setup runs the engine and the daemon as background services; uninstall removes them', async () => {
     const free = 19000 + Math.floor(Math.random() * 500)
-    expect(await main(['setup', '--skip-opencode', '--skip-workbuddy', '--skip-dsh-plugin', '--port', String(free)])).toBe(0)
+    expect(await main(['setup', '--skip-dsh-plugin', '--port', String(free)])).toBe(0)
     const port = (await loadConfig(t.ctx)).port
     expect((await serviceFor(t.ctx, 'engine').status()).running).toBe(true)
     expect((await serviceFor(t.ctx, 'bridge').status()).running).toBe(true)

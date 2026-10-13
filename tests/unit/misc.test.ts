@@ -53,7 +53,7 @@ describe('misc', () => {
     expect(platformTarget('linux', 'x64')).toBe('linux-amd64')
   })
   it('resolves upstream aliases', () => {
-    expect(getUpstream('grok').id).toBe('xai')
+    expect(getUpstream('chatgpt').id).toBe('codex')
     expect(() => getUpstream('nope')).toThrow()
   })
   it('redacts keys', () => {

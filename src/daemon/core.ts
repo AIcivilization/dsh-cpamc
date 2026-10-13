@@ -2,7 +2,8 @@
 //
 // 跑在 bridge 服务进程里（com.dsh-cpamc.bridge / dsh-cpamc-bridge.service），所有操作都不需要 root：
 // 引擎配置与 dsh 配置在 vps 模式下归 dsh 用户，引擎热重载，dsh 热加载。
-// 职责：来源状态与开关、登录会话（引擎 OAuth / WorkBuddy 自有登录 / OpenCode key）、key 管理、用量统计。
+// 职责：六个来源的状态与「在 dsh 里显示 / 隐藏」、命令行备用登录（引擎 OAuth）、key 管理、用量统计、页面上的更新卸载。
+// 显示 / 隐藏只影响 dsh 的模型清单，不改引擎里的凭据；登录与完整设置在原版管理界面里做。
 // CLI 与 dsh 插件都只通过 /control/* 调这里，逻辑只有一份。
 
 import { spawn } from 'node:child_process'
@@ -11,7 +12,6 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { latestVersion, selfJobLog } from '../commands/self.js'
-import { LOCAL_SERVERS, loadLocalCatalog, refreshLocalCatalog } from '../integrations/local.js'
 import { adminInstalled, adminRequestPath, type AdminRequest } from '../service/admin.js'
 import { atomicWrite } from '../util/fs.js'
 import { lang } from '../i18n.js'
@@ -20,35 +20,30 @@ import { spawnDetached } from '../util/detach.js'
 import { PKG_ROOT, pkgVersion } from '../util/pkg.js'
 import { randomBytes } from 'node:crypto'
 import { currentBinary } from '../engine/install.js'
-import { buildRuntime, availableVariants, refreshCatalog, loadCatalogs, type Runtime } from '../bridge/runtime.js'
-import { workbuddyLogin, workbuddyLogout } from '../bridge/login.js'
-import { WORKBUDDY_VARIANTS } from '../bridge/workbuddy/variants.js'
 import type { Ctx } from '../context.js'
 import { tightenAuthPerms } from '../engine/auth.js'
 import { Mgmt, type CredentialEntry } from '../engine/mgmt.js'
 import { DshModelError, isDshModelError } from '../errors.js'
 import { L } from '../i18n.js'
-import { refreshOpencodeModels, removeOpencodeKey, saveOpencodeKey, validateKeyShape, verifyOpencodeKey } from '../integrations/opencode.js'
-import { riskNotice as workbuddyRiskNotice } from '../integrations/workbuddy.js'
 import { DSH_KEY_NAME, addKey, loadKeys, revokeKey, rotateKey, saveKeys } from '../keys.js'
 import { applyEngineConfig, dshCandidates, dshKey, loadAll, saveAll, syncAll } from '../ops.js'
 import { defaultPick, pickedFor } from '../dsh/pick.js'
-import { loadSecrets } from '../secrets.js'
 import { SOURCES, credsFor, findSource, paymentRequired, type SourceDef } from '../sources.js'
 import { withLock } from '../state.js'
 import { riskNotice as upstreamRiskNotice } from '../upstreams.js'
 import { getUpstream } from '../upstreams.js'
 import { redactKey } from '../util/redact.js'
 import { Stats, type StatsSnapshot } from './stats.js'
-import { USAGE_UNSUPPORTED, probeEngineSource, fetchEngineUsage, fetchWorkbuddyUsage, usageFilePath, type SourceUsage } from './usage.js'
+import { USAGE_UNSUPPORTED, probeEngineSource, fetchEngineUsage, usageFilePath, type SourceUsage } from './usage.js'
 import { writeJson } from '../util/fs.js'
 
 const LOGIN_POLL_MS = 2000
 const LOGIN_TIMEOUT_MS = 15 * 60 * 1000
 const USAGE_POLL_MS = 5000
 const STATS_SAVE_MS = 60_000
-const CATALOG_REFRESH_MS = 30 * 60 * 1000
 const RESYNC_RETRY_MS = 60_000
+/** 多久比对一次引擎凭据（原版管理界面里登录 / 停用后，dsh 跟着变） */
+const CRED_WATCH_MS = 20_000
 const USAGE_REFRESH_MS = 5 * 60 * 1000
 /** 查不了用量的来源多久重新实测一次 */
 const PROBE_MS = 6 * 60 * 60 * 1000
@@ -56,15 +51,17 @@ const PROBE_MS = 6 * 60 * 60 * 1000
 export interface SourceState {
   id: string
   label: string
-  kind: SourceDef['kind']
+  /** 引擎的渠道插件（IDE 来源）；false = 引擎原生订阅 */
+  plugin: boolean
   login: SourceDef['login']
   riskAck: boolean
-  /** 高风险来源：界面默认隐藏 */
-  risky: boolean
   subscribeUrl?: string
   pricing: SourceDef['pricing']
   loggedIn: boolean
-  enabled: boolean
+  /** 引擎里还有没停用的凭据（停用是在原版管理界面里做的，这里只读） */
+  active: boolean
+  /** 在 dsh 里显示（显示 / 隐藏开关） */
+  shown: boolean
   account?: string
   detail?: string
   models: number
@@ -106,7 +103,6 @@ const alive = (pid: number) => {
 const log = (m: string) => console.error(`[${new Date().toISOString()}] ${m}`)
 
 export class Daemon {
-  readonly runtimes: Runtime[] = []
   private sessions = new Map<string, SessionInternal>()
   private stats: Stats
   private timers: NodeJS.Timeout[] = []
@@ -114,6 +110,8 @@ export class Daemon {
   private keyNames = new Map<string, string>()
   private usageCache = new Map<string, SourceUsage>()
   private usageInflight?: Promise<void>
+  /** 上次同步进 dsh 时引擎凭据的指纹：在原版管理界面里登录 / 退出 / 停用之后，据此自动重新同步 */
+  private credSig = ''
 
   constructor(private readonly ctx: Ctx) {
     this.stats = new Stats(Stats.path(ctx.paths.home), ctx.owner)
@@ -122,13 +120,10 @@ export class Daemon {
   // —— 生命周期 ——
 
   async start(): Promise<void> {
-    for (const v of await availableVariants(this.ctx.paths.home)) this.runtimes.push(buildRuntime(v, this.ctx.paths.home))
     await this.stats.load()
     await this.reloadKeyNames()
-    if (await this.refreshCatalogs()) void this.resync()
-    this.timers.push(setInterval(() => void this.refreshCatalogs().then((c) => (c ? this.resync() : undefined)), CATALOG_REFRESH_MS))
-    // 本机模型服务（Ollama、LM Studio）随时可能启动或退出：两分钟问一次，变了就同步
-    this.timers.push(setInterval(() => void refreshLocalCatalog(this.ctx.paths.home, this.ctx.owner).then((c) => (c ? this.resync() : undefined), () => {}), 2 * 60 * 1000))
+    void this.watchCredentials()
+    this.timers.push(setInterval(() => void this.watchCredentials(), CRED_WATCH_MS))
     this.timers.push(setInterval(() => void this.pollUsage(), USAGE_POLL_MS))
     this.timers.push(setInterval(() => void this.stats.save().catch(() => {}), STATS_SAVE_MS))
     this.timers.push(setInterval(() => void this.reloadKeyNames(), STATS_SAVE_MS))
@@ -163,16 +158,26 @@ export class Daemon {
     }
   }
 
-  async refreshCatalogs(): Promise<boolean> {
-    let changed = await refreshLocalCatalog(this.ctx.paths.home, this.ctx.owner).catch(() => false)
-    for (const rt of this.runtimes) {
-      try {
-        if (await refreshCatalog(this.ctx.paths.home, rt, this.ctx.owner)) changed = true
-      } catch (error) {
-        log(`daemon: ${rt.label} refresh failed: ${String(error)}`)
-      }
+  /**
+   * 登录、退出、停用凭据大多在原版管理界面里做，守护进程不会收到通知：
+   * 定期比对引擎凭据（名字 + 停用状态），变了就重新同步 dsh 的模型清单。
+   */
+  private async watchCredentials(): Promise<void> {
+    let creds: CredentialEntry[]
+    try {
+      creds = await (await this.mgmt()).credentials()
+    } catch {
+      return // 引擎没起来
     }
-    return changed
+    const sig = creds.map((c) => `${c.name}:${c.disabled ? 0 : 1}`).sort().join(',')
+    if (sig === this.credSig) return
+    const first = this.credSig === ''
+    this.credSig = sig
+    if (!first) {
+      log('daemon: engine credentials changed; resyncing')
+      void this.refreshUsage()
+    }
+    void this.resync()
   }
 
   // —— 用量统计 ——
@@ -200,181 +205,91 @@ export class Daemon {
   async sources(): Promise<SourceState[]> {
     const list = (await this.sourcesRaw()).map((s) => {
       const u = this.usageCache.get(s.id)
-      // 引擎来源：实测结果出来前不显示用量行；OpenCode 的 key 设置时已实测
-      if (USAGE_UNSUPPORTED.has(s.id) && s.loggedIn) {
-        const stub = s.kind !== 'opencode' ? undefined : { source: s.id, windows: [], fetchedAt: new Date().toISOString(), unsupported: true }
-        const usage = u ?? stub
-        return usage ? { ...s, usage } : s
-      }
       return u && s.loggedIn ? { ...s, usage: u } : s
     })
-    // 排序：可用（已接入）→ 已登录但关闭 → 已登录但没有订阅 → 未登录；同档保持注册顺序
-    const rank = (s: SourceState) => (s.loggedIn && s.enabled && !s.usage?.noAccess ? 0 : s.loggedIn && !s.enabled ? 1 : s.loggedIn ? 2 : 3)
+    // 排序：可用 → 已登录但没有可用额度 / 已停用 → 未登录；同档保持注册顺序
+    const rank = (s: SourceState) => (s.loggedIn && s.active && !s.usage?.noAccess ? 0 : s.loggedIn ? 1 : 2)
     return list.map((s, i) => ({ s, i })).sort((a, b) => rank(a.s) - rank(b.s) || a.i - b.i).map((x) => x.s)
   }
 
   private async sourcesRaw(): Promise<SourceState[]> {
     const all = await loadAll(this.ctx)
-    const disabled = new Set(all.config.disabledSources ?? [])
+    const hidden = new Set(all.config.hiddenSources ?? [])
     let creds: CredentialEntry[] = []
-    try {
-      creds = await (await this.mgmt()).credentials()
-    } catch {
-      // 引擎没起来：引擎来源一律显示未登录
-    }
-    const cats = await loadCatalogs(this.ctx.paths.home)
-    const secrets = await loadSecrets(this.ctx)
-    const local = await loadLocalCatalog(this.ctx.paths.home)
-    // 订阅来源能服务的模型数：管理接口按凭据列模型（只数没停用的）
-    const engineModels = new Map<string, number>()
+    const models = new Map<string, number>()
     try {
       const m = await this.mgmt()
-      for (const def of SOURCES.filter((d) => d.kind === 'engine')) {
+      creds = await m.credentials()
+      // 每个来源能服务的模型数：管理接口按凭据列模型（只数没停用的）
+      for (const def of SOURCES) {
         const ids = new Set<string>()
         for (const c of credsFor(creds, def).filter((x) => !x.disabled)) for (const mm of await m.credentialModels(c.name).catch(() => [])) ids.add(mm.id)
-        if (ids.size) engineModels.set(def.id, ids.size)
+        if (ids.size) models.set(def.id, ids.size)
       }
     } catch {
-      // 引擎没起来
+      // 引擎没起来：一律显示未登录
     }
-    const snap = this.stats.snapshot()
-    const modelCount = (prefix: string) => Object.entries(snap.byModel).filter(([m]) => m.startsWith(`${prefix}/`)).length
     return SOURCES.map((def): SourceState => {
-      const base = { id: def.id, label: def.label, kind: def.kind, login: def.login, riskAck: Boolean(def.riskAck), risky: Boolean(def.risky), pricing: def.pricing, ...(def.subscribeUrl ? { subscribeUrl: def.subscribeUrl } : {}) }
-      if (def.kind === 'engine') {
-        const mine = credsFor(creds, def)
-        const active = mine.filter((c) => !c.disabled)
-        const first = mine[0]
-        return {
-          ...base,
-          loggedIn: mine.length > 0,
-          enabled: active.length > 0,
-          ...(first ? { account: accountOf(first) } : {}),
-          ...(first?.status_message ? { detail: String(first.status_message) } : {}),
-          ...(active.length && active.every(paymentRequired) ? { detail: L('引擎收到 403 payment_required：当前账号没有可用订阅', 'Engine got 403 payment_required: this account has no usable subscription') } : {}),
-          models: engineModels.get(def.id) ?? 0,
-        }
+      const mine = credsFor(creds, def)
+      const active = mine.filter((c) => !c.disabled)
+      const first = mine[0]
+      return {
+        id: def.id,
+        label: def.label,
+        plugin: Boolean(def.plugin),
+        login: def.login,
+        riskAck: Boolean(def.riskAck),
+        pricing: def.pricing,
+        ...(def.subscribeUrl ? { subscribeUrl: def.subscribeUrl } : {}),
+        loggedIn: mine.length > 0,
+        active: active.length > 0,
+        shown: !hidden.has(def.id),
+        ...(first ? { account: accountOf(first) } : {}),
+        ...(first?.status_message ? { detail: String(first.status_message) } : {}),
+        ...(active.length && active.every(paymentRequired) ? { detail: L('引擎收到 403 payment_required：当前账号没有可用额度', 'Engine got 403 payment_required: this account has no usable quota') } : {}),
+        models: models.get(def.id) ?? 0,
       }
-      if (def.kind === 'workbuddy') {
-        const c = cats.find((x) => x.prefix === def.variant)
-        return {
-          ...base,
-          loggedIn: Boolean(c?.signedIn),
-          enabled: Boolean(c?.signedIn) && !disabled.has(def.id),
-          ...(c?.nickname ? { account: c.nickname } : {}),
-          ...(c?.error && !c.signedIn ? { detail: c.error } : {}),
-          models: c?.signedIn ? c.models.length : 0,
-        }
-      }
-      if (def.kind === 'local') {
-        const st = local[def.id as 'ollama' | 'lmstudio']
-        const srv = LOCAL_SERVERS.find((x) => x.id === def.id)!
-        const up = Boolean(st?.reachable)
-        return {
-          ...base,
-          loggedIn: up,
-          enabled: up && (st?.models.length ?? 0) > 0 && !disabled.has(def.id),
-          ...(up ? { account: srv.base.replace(/\/v1$/, '') } : { detail: L(`没检测到 ${srv.label} 在运行（${srv.base.replace(/\/v1$/, '')}）`, `${srv.label} is not running (${srv.base.replace(/\/v1$/, '')})`) }),
-          ...(up && !st?.models.length ? { detail: L('在运行，但还没有模型', 'Running, but has no models yet') } : {}),
-          models: st?.models.length ?? 0,
-        }
-      }
-      const has = Boolean(secrets.opencode?.key)
-      return { ...base, loggedIn: has, enabled: has && !disabled.has('opencode'), models: has ? modelCount('opencode') : 0 }
     })
   }
 
-  private async setSourceDisabled(id: string, off: boolean): Promise<void> {
+  /** 显示 / 隐藏：只改 dsh 里的模型清单，引擎里的凭据与设置不动 */
+  async setShown(id: string, shown: boolean): Promise<{ shown: boolean }> {
+    const def = mustSource(id)
     await withLock(this.ctx, async () => {
       const all = await loadAll(this.ctx)
-      const set = new Set(all.config.disabledSources ?? [])
-      if (off) set.add(id)
-      else set.delete(id)
-      all.config.disabledSources = [...set]
+      const set = new Set(all.config.hiddenSources ?? [])
+      if (shown) set.delete(def.id)
+      else set.add(def.id)
+      all.config.hiddenSources = [...set]
       await saveAll(this.ctx, all)
     })
+    await this.resync()
+    return { shown }
   }
 
   /**
-   * 打开：已登录就启用；没登录就开始登录，返回登录会话（界面据此弹窗）。
-   * acceptRisk：claude / antigravity 首次开启要确认风险。
+   * 命令行备用登录（平时在原版管理界面里登录）：已登录就直接返回；没登录就开始登录，返回登录会话。
+   * acceptRisk：claude 首次登录要确认风险。
    */
-  async enable(id: string, opts: { acceptRisk?: boolean } = {}): Promise<{ enabled: boolean; login?: LoginSession; riskNotice?: string }> {
+  async login(id: string, opts: { acceptRisk?: boolean } = {}): Promise<{ loggedIn: boolean; login?: LoginSession; riskNotice?: string }> {
     const def = mustSource(id)
-    const state = (await this.sources()).find((s) => s.id === def.id)!
-    if (def.kind === 'local') {
-      await refreshLocalCatalog(this.ctx.paths.home, this.ctx.owner)
-      const now = (await this.sourcesRaw()).find((s) => s.id === def.id)!
-      if (!now.loggedIn || !now.models) throw new DshModelError('local_not_running', now.detail ?? L(`${def.label} 没在运行`, `${def.label} is not running`), L(`先装好并启动它：${def.subscribeUrl}`, `Install and start it first: ${def.subscribeUrl}`))
-    }
-    if (def.kind === 'opencode' && !state.loggedIn) {
-      throw new DshModelError('needs_key', L('OpenCode Zen 需要 API key：用 opencode/key 提交', 'OpenCode Zen needs an API key: submit it via opencode/key'))
-    }
-    if (!state.loggedIn) {
-      if (def.riskAck && !opts.acceptRisk) return { enabled: false, riskNotice: upstreamRiskNotice(getUpstream(def.id)) }
-      return { enabled: false, login: await this.startLogin(def) }
-    }
-    if (def.kind === 'engine') {
-      const m = await this.mgmt()
-      for (const c of credsFor(await m.credentials(), def)) if (c.disabled) await m.setDisabled(c.name, false)
-      this.forgetProbe(def.id)
-    } else {
-      await this.setSourceDisabled(def.id, false)
-    }
-    await this.resync()
-    void this.refreshUsage()
-    return { enabled: true }
+    const state = (await this.sourcesRaw()).find((s) => s.id === def.id)!
+    if (state.loggedIn) return { loggedIn: true }
+    if (def.riskAck && !opts.acceptRisk) return { loggedIn: false, riskNotice: upstreamRiskNotice(getUpstream(def.id)) }
+    return { loggedIn: false, login: await this.startLogin(def) }
   }
 
-  /** 关闭：只停用，登录保留 */
-  async disable(id: string): Promise<void> {
-    const def = mustSource(id)
-    if (def.kind === 'engine') {
-      const m = await this.mgmt()
-      for (const c of credsFor(await m.credentials(), def)) if (!c.disabled) await m.setDisabled(c.name, true)
-    } else {
-      await this.setSourceDisabled(def.id, true)
-    }
-    await this.resync()
-  }
-
-  /** 退出登录：删掉 dsh-cpamc 保存的凭据（桌面 App 自己的登录不动） */
+  /** 退出登录：删掉引擎里这个来源的凭据 */
   async logout(id: string): Promise<void> {
     const def = mustSource(id)
-    if (def.kind === 'engine') {
-      const m = await this.mgmt()
-      for (const c of credsFor(await m.credentials(), def)) await m.deleteCredential(c.name)
-    } else if (def.kind === 'local') {
-      throw new DshModelError('no_logout', L(`${def.label} 不需要登录；不想用就关掉开关`, `${def.label} has no sign-in; turn the switch off instead`))
-    } else if (def.kind === 'workbuddy') {
-      const v = WORKBUDDY_VARIANTS.find((x) => x.id === def.variant)!
-      await workbuddyLogout(v, this.ctx.paths.home)
-      await this.refreshCatalogs()
-    } else {
-      await removeOpencodeKey(this.ctx)
-    }
+    const m = await this.mgmt()
+    for (const c of credsFor(await m.credentials(), def)) await m.deleteCredential(c.name)
     await this.resync()
-  }
-
-  async setOpencodeKey(key: string, opts: { skipVerify?: boolean } = {}): Promise<{ model?: string }> {
-    validateKeyShape(key)
-    const all = await loadAll(this.ctx)
-    let model: string | undefined
-    if (!opts.skipVerify) {
-      const v = await verifyOpencodeKey(key, all.config.proxy)
-      if (!v.ok) throw new DshModelError('opencode_key_rejected', L(`实测失败（${v.model ?? '-'}）：${v.detail}`, `Test failed (${v.model ?? '-'}): ${v.detail}`))
-      model = v.model
-    }
-    await saveOpencodeKey(this.ctx, key, model)
-    await refreshOpencodeModels(this.ctx, all.config.proxy)
-    await this.setSourceDisabled('opencode', false)
-    await this.resync()
-    return { ...(model ? { model } : {}) }
   }
 
   // —— 订阅用量 ——
 
-  /** 刷新所有已登录且已打开来源的用量（单飞：并发调用共用一次） */
+  /** 刷新所有已登录来源的用量（单飞：并发调用共用一次） */
   refreshUsage(): Promise<void> {
     this.usageInflight ??= this.doRefreshUsage().finally(() => (this.usageInflight = undefined))
     return this.usageInflight
@@ -385,7 +300,7 @@ export class Daemon {
     await this.doRefreshUsageInner()
     await writeJson(usageFilePath(this.ctx.paths.home), [...this.usageCache.values()], { owner: this.ctx.owner }).catch(() => {})
     const after = [...this.usageCache.values()].filter((u) => u.noAccess).map((u) => u.source).sort().join(',')
-    // 某个来源"有没有可用订阅"变了：重新同步，dsh 里相应地隐藏 / 恢复它的模型
+    // 某个来源"有没有可用额度"变了：重新同步，dsh 里相应地隐藏 / 恢复它的模型
     if (before !== after) void this.resync()
   }
 
@@ -400,7 +315,7 @@ export class Daemon {
     await Promise.all(
       states.map(async (s) => {
         const def = findSource(s.id)!
-        if (!s.loggedIn || (USAGE_UNSUPPORTED.has(s.id) && def.kind !== 'engine')) {
+        if (!s.loggedIn) {
           this.usageCache.delete(s.id)
           return
         }
@@ -410,16 +325,9 @@ export class Daemon {
         }
         const fetchedAt = new Date().toISOString()
         try {
-          let u: Omit<SourceUsage, 'source' | 'fetchedAt'>
-          if (def.kind === 'workbuddy') {
-            const rt = this.runtimes.find((r) => r.variant.id === def.variant)
-            if (!rt) return
-            u = await fetchWorkbuddyUsage(rt)
-          } else if (def.kind === 'engine') {
-            const cred = credsFor(creds, def)[0]
-            if (!cred) return
-            u = await fetchEngineUsage(this.ctx, def, cred)
-          } else return
+          const cred = credsFor(creds, def)[0]
+          if (!cred) return
+          const u = await fetchEngineUsage(this.ctx, def, cred)
           this.usageCache.set(s.id, { source: s.id, fetchedAt, ...u })
         } catch (error) {
           const prev = this.usageCache.get(s.id)
@@ -430,10 +338,10 @@ export class Daemon {
     )
   }
 
-  /** 查不了用量的引擎来源：实测一次能不能调（每 6 小时；登录 / 重新打开后立即） */
+  /** 查不了用量的来源：实测一次能不能调（每 6 小时；登录后立即） */
   private async probe(s: SourceState, def: SourceDef, creds: CredentialEntry[]): Promise<void> {
     const prev = this.usageCache.get(s.id)
-    if (!s.enabled) return
+    if (!s.active) return
     if (prev && Date.now() - Date.parse(prev.fetchedAt) < PROBE_MS) return
     const fetchedAt = new Date().toISOString()
     try {
@@ -478,9 +386,7 @@ export class Daemon {
   private async startLogin(def: SourceDef): Promise<LoginSession> {
     // 同一来源只留一个进行中的会话
     for (const s of this.sessions.values()) if (s.source === def.id && s.status === 'pending') this.cancelSession(s.id)
-    if (def.kind === 'engine') return this.startEngineLogin(def)
-    if (def.kind === 'workbuddy') return this.startWorkbuddyLogin(def)
-    throw new DshModelError('no_login', L(`${def.label} 不需要登录`, `${def.label} has no login`))
+    return this.startEngineLogin(def)
   }
 
   /** 用引擎自带的 device code 登录（如 -codex-device-login）：打印网址和码，引擎自己轮询并写凭据 */
@@ -498,7 +404,7 @@ export class Daemon {
       expiresAt: new Date(Date.now() + LOGIN_TIMEOUT_MS).toISOString(),
       needsPaste: false,
       startedAt: new Date().toISOString(),
-      provider: def.engineProvider!,
+      provider: def.engineProvider,
       before,
       abort,
     }
@@ -541,7 +447,7 @@ export class Daemon {
     if (def.deviceCliFlag) return this.startCliDeviceLogin(def)
     const m = await this.mgmt()
     const before = credsFor(await m.credentials(), def).map((c) => c.name)
-    const r = await m.authUrl(def.engineProvider!)
+    const r = await m.authUrl(def.engineProvider)
     const device = r.flow === 'device'
     const s: SessionInternal = {
       id: r.state,
@@ -554,7 +460,7 @@ export class Daemon {
       needsPaste: !device,
       startedAt: new Date().toISOString(),
       engineState: r.state,
-      provider: def.engineProvider!,
+      provider: def.engineProvider,
       before,
     }
     this.sessions.set(s.id, s)
@@ -606,56 +512,6 @@ export class Daemon {
       s.status = 'error'
       s.error = String((error as Error).message ?? error)
     }
-  }
-
-  private async startWorkbuddyLogin(def: SourceDef): Promise<LoginSession> {
-    const variant = WORKBUDDY_VARIANTS.find((v) => v.id === def.variant)!
-    const all = await loadAll(this.ctx)
-    if (!all.config.bridge?.riskNoticeAt) {
-      all.config.bridge = { port: all.config.bridge?.port ?? 0, ...all.config.bridge, riskNoticeAt: new Date().toISOString() }
-      await saveAll(this.ctx, all)
-      log(workbuddyRiskNotice())
-    }
-    const s: SessionInternal = {
-      id: `wb-${randomBytes(8).toString('hex')}`,
-      source: def.id,
-      kind: 'link',
-      status: 'pending',
-      needsPaste: false,
-      startedAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
-      abort: new AbortController(),
-    }
-    this.sessions.set(s.id, s)
-    let urlReady!: () => void
-    const ready = new Promise<void>((r) => (urlReady = r))
-    void workbuddyLogin(variant, this.ctx.paths.home, {
-      proxy: all.config.proxy,
-      owner: this.ctx.owner,
-      signal: s.abort!.signal,
-      onUrl: (url) => {
-        s.url = url
-        urlReady()
-      },
-    })
-      .then(async () => {
-        s.status = 'ok'
-        if (!this.runtimes.some((r) => r.variant.id === variant.id)) this.runtimes.push(buildRuntime(variant, this.ctx.paths.home))
-        await this.setSourceDisabled(def.id, false)
-        await this.refreshCatalogs()
-        await this.resync()
-      })
-      .catch((error: unknown) => {
-        if (s.status === 'pending') {
-          s.status = 'error'
-          s.error = String((error as Error).message ?? error)
-        }
-        urlReady()
-      })
-    // 等拿到授权链接（或失败）再返回，界面才有东西可显示
-    await Promise.race([ready, new Promise((r) => setTimeout(r, 30_000))])
-    if (s.status === 'error') throw new DshModelError('login_failed', s.error ?? 'login failed')
-    return publicSession(s)
   }
 
   /** 回调式登录：用户贴回浏览器跳转到的地址 */
@@ -749,7 +605,7 @@ export class Daemon {
     const all = await loadAll(this.ctx)
     const c = (await dshCandidates(this.ctx, all)).get(def.id)
     const list = (c?.models ?? []).map((m) => ({ id: m.id, name: m.name, rate: m.rate }))
-    const chosen = all.config.dshCpamcs?.[def.id]
+    const chosen = all.config.dshModels?.[def.id]
     const picked = new Set(pickedFor(list, chosen))
     const rec = new Set(defaultPick(list))
     return { custom: chosen !== undefined, models: list.map((m) => ({ id: m.id, name: m.name, selected: picked.has(m.id), recommended: rec.has(m.id) })) }
@@ -763,10 +619,10 @@ export class Daemon {
     }
     await withLock(this.ctx, async () => {
       const all = await loadAll(this.ctx)
-      const next = { ...all.config.dshCpamcs }
+      const next = { ...all.config.dshModels }
       if (models === null) delete next[def.id]
       else next[def.id] = [...new Set(models)]
-      all.config.dshCpamcs = Object.keys(next).length ? next : undefined
+      all.config.dshModels = Object.keys(next).length ? next : undefined
       await saveAll(this.ctx, all)
     })
     await this.resync()
@@ -837,23 +693,20 @@ export class Daemon {
       }
       if (method === 'GET' && path === '/sources') {
         if (query.get('refresh') === '1') {
-          // 本机模型服务开没开：页面打开时顺手问一下（1.5 秒超时），变了就同步进 dsh
-          if (await refreshLocalCatalog(this.ctx.paths.home, this.ctx.owner).catch(() => false)) void this.resync()
+          await this.watchCredentials()
           await this.refreshUsage()
         }
         return ok(await this.sources())
       }
       if (seg[0] === 'sources' && seg[1] && method === 'POST') {
-        if (seg[2] === 'enable') return ok(await this.enable(seg[1], { acceptRisk: b.acceptRisk === true }))
-        if (seg[2] === 'disable') return ok(await this.disable(seg[1]).then(() => ({ enabled: false })))
+        if (seg[2] === 'show') return ok(await this.setShown(seg[1], true))
+        if (seg[2] === 'hide') return ok(await this.setShown(seg[1], false))
+        if (seg[2] === 'login') return ok(await this.login(seg[1], { acceptRisk: b.acceptRisk === true }))
         if (seg[2] === 'logout') return ok(await this.logout(seg[1]).then(() => ({ loggedIn: false })))
       }
       if (seg[0] === 'sources' && seg[1] && seg[2] === 'models') {
         if (method === 'GET') return ok(await this.sourceModels(seg[1]))
         if (method === 'POST') return ok(await this.setSourceModels(seg[1], b.models === null ? null : (b.models as string[])))
-      }
-      if (method === 'POST' && path === '/opencode/key') {
-        return ok(await this.setOpencodeKey(String(b.key ?? ''), { skipVerify: b.skipVerify === true }))
       }
       if (seg[0] === 'login' && seg[1]) {
         if (method === 'GET') {

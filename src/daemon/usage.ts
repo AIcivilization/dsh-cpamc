@@ -1,17 +1,14 @@
 // daemon/usage.ts — 订阅用量（设计 §14.6）
 //
-// 用各来源已有的登录令牌，主动去调它们自己的额度接口。思路与接口来自 steipete 的 CodexBar（MIT，docs/<provider>.md）：
+// 用各来源已有的登录令牌，主动去调它们自己的额度接口：
 //   Codex   GET chatgpt.com/backend-api/wham/usage            rate_limit.primary_window / secondary_window
 //   Claude  GET api.anthropic.com/api/oauth/usage             five_hour / seven_day / seven_day_opus（anthropic-beta: oauth-2025-04-20）
-//   Kimi    GET api.kimi.com/coding/v1/usages                 usage（总额度）+ limits[].window（如 5 小时）
-//   Grok    GET cli-chat-proxy.grok.com/v1/billing?format=credits（返回格式未公开，宽松解析）
-//   WorkBuddy 移植来的 fetchCredits（剩余积分）
-// 令牌来源：引擎 auth-dir 里的凭据文件（引擎会自动续期并写回），WorkBuddy 用 bridge 的凭据库。
+// 四个 IDE 来源（渠道插件）查不了统一的额度接口：登录后实测一次能不能调（见 USAGE_UNSUPPORTED）。
+// 令牌来源：引擎 auth-dir 里的凭据文件（引擎会自动续期并写回）。
 // 一律只读：不刷新、不改写任何凭据文件。查询失败只在那一行显示"用量暂不可用"。
 
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { Runtime } from '../bridge/runtime.js'
 import type { Ctx } from '../context.js'
 import type { CredentialEntry } from '../engine/mgmt.js'
 import type { SourceDef } from '../sources.js'
@@ -42,7 +39,7 @@ export interface SourceUsage {
 const TIMEOUT_MS = 15_000
 
 /** 这几家暂不支持（见设计 §14.6） */
-export const USAGE_UNSUPPORTED = new Set(['antigravity', 'devin', 'meta', 'opencode', 'ollama', 'lmstudio'])
+export const USAGE_UNSUPPORTED = new Set(['workbuddy', 'trae', 'qoder', 'zcode'])
 
 async function getJson(url: string, headers: Record<string, string>): Promise<unknown> {
   const res = await fetch(url, { headers: { Accept: 'application/json', ...headers }, signal: AbortSignal.timeout(TIMEOUT_MS) })
@@ -121,44 +118,7 @@ export function parseClaudeUsage(body: unknown): Pick<SourceUsage, 'windows'> {
   return { windows }
 }
 
-export function parseKimiUsage(body: unknown): Pick<SourceUsage, 'windows'> {
-  const b = obj(body) ?? {}
-  const windows: UsageWindow[] = []
-  const fromDetail = (d: unknown, id: string, label: string) => {
-    const o = obj(d)
-    if (!o) return
-    const limit = num(o.limit)
-    const used = num(o.used) ?? (limit !== undefined && num(o.remaining) !== undefined ? limit - num(o.remaining)! : undefined)
-    const resetAt = toIso(o.resetTime)
-    windows.push({
-      id,
-      label,
-      ...(used !== undefined ? { used } : {}),
-      ...(limit !== undefined ? { limit } : {}),
-      ...(used !== undefined && limit ? { usedPercent: Math.round((used / limit) * 1000) / 10 } : {}),
-      ...(resetAt ? { resetAt } : {}),
-    })
-  }
-  for (const l of (Array.isArray(b.limits) ? b.limits : []) as unknown[]) {
-    const o = obj(l) ?? {}
-    const w = obj(o.window) ?? {}
-    const dur = num(w.duration) ?? 0
-    const unit = String(w.timeUnit ?? '')
-    const secs = unit.includes('MINUTE') ? dur * 60 : unit.includes('HOUR') ? dur * 3600 : unit.includes('DAY') ? dur * 86400 : dur
-    const label = secs ? humanWindow(secs) : 'limit'
-    fromDetail(o.detail, `w${secs}`, label)
-  }
-  fromDetail(b.usage, 'total', 'quota')
-  return { windows }
-}
 
-export function parseGrokBilling(body: unknown): Pick<SourceUsage, 'credits' | 'windows'> {
-  const b = obj(body) ?? {}
-  const c = obj(b.credits) ?? b
-  const remaining = num(c.remaining) ?? num(c.balance) ?? num(c.remainingCredits) ?? num(c.available)
-  const total = num(c.total) ?? num(c.limit) ?? num(c.totalCredits)
-  return { windows: [], ...(remaining !== undefined ? { credits: { remaining, ...(total !== undefined ? { total } : {}), label: 'credits' } } : {}) }
-}
 
 function humanWindow(secs: number): string {
   if (secs % 86400 === 0) return `${secs / 86400}d`
@@ -183,34 +143,7 @@ export async function fetchEngineUsage(ctx: Ctx, def: SourceDef, cred: Credentia
     const body = await getJson('https://api.anthropic.com/api/oauth/usage', { Authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20' })
     return parseClaudeUsage(body)
   }
-  if (def.id === 'kimi') {
-    const r = parseKimiUsage(await getJson('https://api.kimi.com/coding/v1/usages', { Authorization: `Bearer ${token}` }))
-    // 没有 Kimi Code 订阅时接口返回 {}（实测；同一账号调模型得到 403 access_terminated）
-    return r.windows.length ? r : { windows: [], noAccess: true, plan: 'none' }
-  }
-  if (def.id === 'xai') {
-    return parseGrokBilling(await getJson('https://cli-chat-proxy.grok.com/v1/billing?format=credits', { Authorization: `Bearer ${token}` }))
-  }
   return { windows: [], unsupported: true }
-}
-
-export async function fetchWorkbuddyUsage(rt: Runtime): Promise<Omit<SourceUsage, 'source' | 'fetchedAt'>> {
-  const credential = await rt.wbStore.resolve()
-  const credits = await rt.wbClient.fetchCredits(credential)
-  const unlimited = credits.accounts.some((a) => a.unlimited)
-  const size = credits.accounts.reduce((s, a) => s + (Number.isFinite(a.size) ? a.size : 0), 0)
-  return {
-    windows: [],
-    credits: { remaining: credits.total, ...(size > 0 ? { total: size } : {}), ...(unlimited ? { unlimited: true } : {}), label: 'credits' },
-    ...(credits.accounts.length ? { plan: packageSummary(credits.accounts.map((a) => a.packageName)) } : {}),
-  }
-}
-
-/** 套餐名去重计数："个人版 + 加量包 ×38"（账号下常有几十个同名加量包，实测） */
-export function packageSummary(names: string[]): string {
-  const counts = new Map<string, number>()
-  for (const n of names) if (n) counts.set(n, (counts.get(n) ?? 0) + 1)
-  return [...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join(' + ')
 }
 
 /** 实测一次能不能调：发一条极短的请求（经引擎，用 dsh 的 key）。

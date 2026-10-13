@@ -3,7 +3,7 @@
 import { chmod, chown, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Ctx } from '../context.js'
-import { UPSTREAMS, type UpstreamDef } from '../upstreams.js'
+import { SOURCES } from '../sources.js'
 import { isNotFound } from '../util/fs.js'
 
 export async function listAuthFiles(ctx: Ctx): Promise<string[]> {
@@ -16,15 +16,15 @@ export async function listAuthFiles(ctx: Ctx): Promise<string[]> {
   }
 }
 
-export function filesFor(files: string[], def: UpstreamDef): string[] {
+export function filesFor(files: string[], def: { filePrefix: string }): string[] {
   return files.filter((f) => f.startsWith(def.filePrefix))
 }
 
-/** 每个上游登录了几个账号；不认识前缀的文件归到 other */
+/** 每个来源登录了几个账号（按文件名前缀，只用于总览）；不认识前缀的文件归到 other */
 export function summarize(files: string[]): { byUpstream: Record<string, string[]>; other: string[] } {
   const byUpstream: Record<string, string[]> = {}
   const claimed = new Set<string>()
-  for (const def of UPSTREAMS) {
+  for (const def of SOURCES) {
     const mine = filesFor(files, def)
     if (mine.length) byUpstream[def.id] = mine
     mine.forEach((f) => claimed.add(f))
