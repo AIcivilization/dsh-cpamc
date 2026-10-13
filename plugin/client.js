@@ -198,10 +198,28 @@ window.__ModuleLoader__.load({
     }
 
     // —— 页眉（R7）——
+    /** a 是否比 b 新（语义化版本：正式版 > 预发布版，alpha.6 > alpha.3；与命令行的 compareVersions 同一规则） */
     const newer = (a, b) => {
-      const pa = String(a || '').split(/[.-]/).map((x) => parseInt(x, 10) || 0)
-      const pb = String(b || '').split(/[.-]/).map((x) => parseInt(x, 10) || 0)
-      for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0)
+      const parse = (v) => {
+        const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/.exec(String(v || '').trim())
+        return m ? { core: [+m[1], +m[2], +m[3]], pre: m[4] ? m[4].split('.') : [] } : { core: [0, 0, 0], pre: [] }
+      }
+      const x = parse(a)
+      const y = parse(b)
+      for (let i = 0; i < 3; i++) if (x.core[i] !== y.core[i]) return x.core[i] > y.core[i]
+      if (!x.pre.length || !y.pre.length) return !x.pre.length && y.pre.length > 0
+      for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+        const p = x.pre[i]
+        const q = y.pre[i]
+        if (p === undefined) return false
+        if (q === undefined) return true
+        if (p === q) continue
+        const pn = /^\d+$/.test(p)
+        const qn = /^\d+$/.test(q)
+        if (pn && qn) return +p > +q
+        if (pn !== qn) return !pn
+        return p > q
+      }
       return false
     }
 

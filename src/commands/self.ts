@@ -17,28 +17,54 @@ import { loadAll, saveAll } from '../ops.js'
 import { withLock } from '../state.js'
 import { run, runInherit } from '../util/exec.js'
 import { exists } from '../util/fs.js'
+import { download } from '../util/download.js'
 import { info, next, ok, skip, warn } from '../util/output.js'
 import { PKG_ROOT, pkgVersion } from '../util/pkg.js'
 import { takeAdminRequest } from '../service/admin.js'
 
-const REGISTRY = 'https://registry.npmjs.org/dsh-cpamc'
 
 /** a 比 b 新（只比 major.minor.patch） */
+/** a 是否比 b 新（语义化版本：先比 x.y.z；相同时正式版 > 预发布版；预发布逐段比，数字段按数值） */
 export function isNewer(a: string, b: string): boolean {
-  const pa = a.split(/[.-]/).map((x) => parseInt(x, 10) || 0)
-  const pb = b.split(/[.-]/).map((x) => parseInt(x, 10) || 0)
-  for (let i = 0; i < 3; i++) if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) > (pb[i] ?? 0)
-  return false
+  return compareVersions(a, b) > 0
 }
 
-export async function latestVersion(): Promise<string | null> {
-  try {
-    const r = await fetch(`${REGISTRY}/latest`, { signal: AbortSignal.timeout(10_000) })
-    if (!r.ok) return null
-    return String(((await r.json()) as { version?: string }).version ?? '') || null
-  } catch {
-    return null
+export function compareVersions(a: string, b: string): number {
+  const parse = (v: string) => {
+    const [core = '', pre = ''] = String(v).trim().replace(/^v/, '').split('+')[0]!.split(/-(.*)/s)
+    return { core: core.split('.').map((x) => parseInt(x, 10) || 0), pre: pre ? pre.split('.') : [] }
   }
+  const x = parse(a)
+  const y = parse(b)
+  for (let i = 0; i < 3; i++) if ((x.core[i] ?? 0) !== (y.core[i] ?? 0)) return (x.core[i] ?? 0) > (y.core[i] ?? 0) ? 1 : -1
+  if (!x.pre.length || !y.pre.length) return x.pre.length === y.pre.length ? 0 : x.pre.length ? -1 : 1
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+    const p = x.pre[i]
+    const q = y.pre[i]
+    if (p === undefined) return -1
+    if (q === undefined) return 1
+    if (p === q) continue
+    const pn = /^\d+$/.test(p)
+    const qn = /^\d+$/.test(q)
+    if (pn && qn) return Number(p) > Number(q) ? 1 : -1
+    if (pn !== qn) return pn ? -1 : 1
+    return p > q ? 1 : -1
+  }
+  return 0
+}
+
+/** npm 上的最新版：国内镜像（直连）与官方源（经代理）一起查，取较新的；都查不到返回 null */
+export async function latestVersion(proxy?: string | null): Promise<string | null> {
+  const ask = async (registry: string, via: string | null | undefined) => {
+    try {
+      const v = String(JSON.parse((await download(`${registry}/dsh-cpamc/latest`, via)).toString('utf8')).version ?? '')
+      return /^\d+\.\d+\.\d+/.test(v) ? v : null
+    } catch {
+      return null
+    }
+  }
+  const found = (await Promise.all([ask('https://registry.npmmirror.com', null), ask('https://registry.npmjs.org', proxy)])).filter((v): v is string => Boolean(v))
+  return found.sort((p, q) => compareVersions(q, p))[0] ?? null
 }
 
 /** 和当前 node 同目录的 npm，以及让它能找到 node 的环境 */
@@ -67,7 +93,7 @@ async function npmGlobalInstall(): Promise<{ npm: string; env: NodeJS.ProcessEnv
 export async function selfUpdate(ctx: Ctx, opts: { to?: string } = {}): Promise<number> {
   requireRootInVps(ctx)
   const current = pkgVersion()
-  const target = opts.to ?? (await latestVersion())
+  const target = opts.to ?? (await latestVersion((await loadAll(ctx)).config.proxy))
   if (!target) throw new DshModelError('no_latest', L('查不到 npm 上的最新版本（网络？）', 'Could not get the latest version from npm (network?)'), L('稍后再试，或指定：dsh-cpamc self-update --to <版本>', 'Try later, or pass one: dsh-cpamc self-update --to <version>'))
   if (!opts.to && !isNewer(target, current)) {
     ok(L(`已是最新（${current}；npm 上最新 ${target}）`, `Up to date (${current}; latest on npm is ${target})`))

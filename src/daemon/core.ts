@@ -565,7 +565,7 @@ export class Daemon {
     if (this.selfJob) log = await readFile(this.selfJob.log, 'utf8').catch(() => '')
     return {
       version: pkgVersion(),
-      latest: await latestVersion(),
+      latest: await latestVersion((await loadAll(this.ctx)).config.proxy),
       canManage: !vps || (await adminInstalled()),
       ...(this.selfJob ? { job: { action: this.selfJob.action, startedAt: this.selfJob.startedAt, log: log.replace(/\x1b\[[0-9;]*m/g, '').slice(-6000) } } : {}),
       commands: vps

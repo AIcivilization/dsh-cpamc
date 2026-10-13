@@ -112,6 +112,15 @@ describe('settings page rendering', () => {
     expect(html).toContain('boom in render')
   })
 
+  it('the page and the CLI agree on which version is newer', async () => {
+    const m = load('en') as unknown as { __test: { newer: (a: string, b: string) => boolean } }
+    const { isNewer } = await import('../../src/commands/self.js')
+    const pairs = [['0.1.0-alpha.6', '0.1.0-alpha.3'], ['0.1.0-alpha.3', '0.1.0-alpha.6'], ['0.1.0', '0.1.0-alpha.6'], ['0.1.0-alpha.6', '0.1.0'], ['0.2.0', '0.1.9'], ['0.1.0-alpha.6', '0.1.0-alpha.6'], ['0.1.0-alpha.10', '0.1.0-alpha.9']]
+    for (const [a, b] of pairs) expect([a, b, m.__test.newer(a!, b!)]).toEqual([a, b, isNewer(a!, b!)])
+    const header = render(m as never, 'Header', { self: { version: '0.1.0-alpha.3', latest: '0.1.0-alpha.6', canManage: true, commands: { update: 'u', uninstall: 'x' } }, onJob: noop })
+    expect(header).toContain('Update to v0.1.0-alpha.6')
+  })
+
   it('source status labels', () => {
     const m = load('en')
     expect(m.__test.statusOf({ loggedIn: false }).text).toBe('Signed out')

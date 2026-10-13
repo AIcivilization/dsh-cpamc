@@ -92,6 +92,16 @@ describe('proxy', () => {
 })
 
 describe('self-update version compare', () => {
+  it('handles prereleases (alpha.6 is newer than alpha.3; a release is newer than its prereleases)', async () => {
+    const { isNewer, compareVersions } = await import('../../src/commands/self.js')
+    expect(isNewer('0.1.0-alpha.6', '0.1.0-alpha.3')).toBe(true)
+    expect(isNewer('0.1.0-alpha.10', '0.1.0-alpha.9')).toBe(true)
+    expect(isNewer('0.1.0-alpha.3', '0.1.0-alpha.6')).toBe(false)
+    expect(isNewer('0.1.0', '0.1.0-alpha.6')).toBe(true)
+    expect(isNewer('0.1.0-alpha.6', '0.1.0')).toBe(false)
+    expect(isNewer('0.1.0-beta.1', '0.1.0-alpha.9')).toBe(true)
+    expect(compareVersions('0.1.0-alpha.6', '0.1.0-alpha.6')).toBe(0)
+  })
   it('compares major.minor.patch', async () => {
     const { isNewer } = await import('../../src/commands/self.js')
     expect(isNewer('0.14.1', '0.14.0')).toBe(true)

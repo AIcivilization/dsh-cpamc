@@ -1,6 +1,6 @@
 {
   "name": "dsh-cpamc",
-  "version": "0.1.0-alpha.6",
+  "version": "0.1.0-alpha.7",
   "description": "Model provider for DeepSeek Harness (DSH): WorkBuddy, Trae, Qoder, ZCode and your Claude / Codex subscriptions behind one OpenAI-compatible endpoint, with a lightweight settings panel and the full management interface one click away. · DSH 的模型提供方：设置页轻量管理，「全部功能」一键打开完整管理界面。",
   "keywords": [
     "dsh-plugin",
