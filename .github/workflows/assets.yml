@@ -38,13 +38,16 @@ jobs:
         with:
           name: dsh-cpamc-assets
           path: build/assets
-      - name: Publish to npm
+      - name: Stage on npm (maintainer approves with 2FA afterwards)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # npm 的新规则：能跳过两步验证的令牌只能「暂存发布」（也能借此创建新包），版本要维护者用两步验证批准后才上线：
+        #   本机执行 scripts/approve-assets.sh（npm stage approve <编号>）
         run: |
           if [ -z "${NODE_AUTH_TOKEN}" ]; then echo "NPM_TOKEN is not set; packages were built and uploaded as an artifact only"; exit 0; fi
           for d in build/assets/*/; do
             name=$(node -p "require('./$d/package.json').name"); version=$(node -p "require('./$d/package.json').version")
-            if npm view "$name@$version" version >/dev/null 2>&1; then echo "skip $name@$version"; continue; fi
-            (cd "$d" && npm publish --access public --provenance)
+            if npm view "$name@$version" version >/dev/null 2>&1; then echo "skip $name@$version (already published)"; continue; fi
+            (cd "$d" && npx -y npm@11 stage publish --access public --provenance)
           done
+          echo "Staged. Approve on your computer: ./scripts/approve-assets.sh"
