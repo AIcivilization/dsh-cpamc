@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 // @ts-expect-error 纯 JS 模块
-import { ENGINE_PREFIXES, PANEL_PREFIX, registerPanelRoutes } from '../../plugin/panel-proxy.js'
+import { ENGINE_PREFIXES, PANEL_PREFIX, V1_PREFIX, registerPanelRoutes } from '../../plugin/panel-proxy.js'
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => unknown
 
@@ -20,6 +20,19 @@ describe('management interface through the dsh web server', () => {
   beforeAll(async () => {
     engine = createServer((req, res) => {
       seen.push({ method: req.method, url: req.url, auth: req.headers.authorization, cookie: req.headers.cookie, host: req.headers.host })
+      if (req.url === '/v1/chat/completions') {
+        // 流式：分三段发，间隔 150ms
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        let n = 0
+        const t = setInterval(() => {
+          res.write(`data: {"n":${n}}\n\n`)
+          if (++n === 3) {
+            clearInterval(t)
+            res.end('data: [DONE]\n\n')
+          }
+        }, 150)
+        return
+      }
       res.writeHead(200, { 'content-type': 'application/json', 'set-cookie': 'engine=1' })
       res.end(JSON.stringify({ ok: true, url: req.url }))
     })
@@ -81,6 +94,33 @@ describe('management interface through the dsh web server', () => {
     expect(seen.at(-1)?.method).toBe('PUT')
     const del = await fetch(`${base}/v0/management/auth-files?name=x`, { method: 'DELETE', headers: { Origin: 'https://evil.example' } })
     expect(del.status).toBe(403)
+  })
+
+  it('serves the model API to other devices without a dsh sign-in, but only with an API key', async () => {
+    allow = false
+    const before = seen.length
+    expect((await fetch(`${base}${V1_PREFIX}/models`)).status).toBe(401)
+    expect(seen.length).toBe(before)
+    const r = await fetch(`${base}${V1_PREFIX}/models`, { headers: { Authorization: 'Bearer dshc_key', Cookie: 'dsh-auth=x' } })
+    expect(r.status).toBe(200)
+    expect(seen.at(-1)).toMatchObject({ url: '/v1/models', auth: 'Bearer dshc_key', cookie: undefined })
+    expect((await fetch(`${base}${V1_PREFIX}x/models`, { headers: { Authorization: 'Bearer k' } })).status).toBe(404)
+    // 流式响应逐段到达，不被攒到最后
+    const t0 = Date.now()
+    const sse = await fetch(`${base}${V1_PREFIX}/chat/completions`, { method: 'POST', headers: { Authorization: 'Bearer dshc_key', 'content-type': 'application/json' }, body: '{"stream":true}' })
+    const reader = sse.body!.getReader()
+    const first = await reader.read()
+    const firstAt = Date.now() - t0
+    let rest = ''
+    for (;;) {
+      const c = await reader.read()
+      if (c.done) break
+      rest += new TextDecoder().decode(c.value)
+    }
+    expect(new TextDecoder().decode(first.value)).toContain('"n":0')
+    expect(firstAt).toBeLessThan(400)
+    expect(rest).toContain('[DONE]')
+    allow = true
   })
 
   it('says so when the model service is down', async () => {

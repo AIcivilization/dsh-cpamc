@@ -22,6 +22,13 @@ window.__ModuleLoader__.load({
     }
     const L = (zh, en) => (isZh() ? zh : en)
 
+    /** 页面是不是在本机打开的（地址是回环）；读不到地址就按本机算 */
+    const LOOPBACK = ['127.0.0.1', 'localhost', '[::1]', '::1']
+    const isLoopbackPage = () => {
+      try { return LOOPBACK.includes(window.location.hostname) } catch { return true }
+    }
+    const pageOrigin = () => { try { return window.location.origin } catch { return '' } }
+
     // —— 调宿主 ——
     let token = window.__DSH_CPAMC_TOKEN__ || ''
     async function refreshToken() {
@@ -411,9 +418,12 @@ window.__ModuleLoader__.load({
         if (!window.confirm(L(`吊销 ${k.name}？用它的设备会立即无法访问。`, `Revoke ${k.name}? Devices using it lose access immediately.`))) return
         try { await api('DELETE', `/keys/${encodeURIComponent(k.name)}`); await reload() } catch (e) { setErr(e.message) }
       }
+      // 远程浏览器里打开（dsh 在服务器上）：其他设备经 dsh 自己的网址调模型，只认 API key
+      const remote = !isLoopbackPage()
+      const external = remote ? `${pageOrigin()}/dsh-cpamc/v1` : endpoints?.public
       const addrs = endpoints ? [
-        ...(endpoints.public ? [{ id: 'public', name: L('外部地址', 'Public'), url: endpoints.public, note: L('你的电脑、手机或其他软件用这个', 'Use this from your computer, phone or other tools') }] : []),
-        { id: 'local', name: L('本机地址', 'Local'), url: endpoints.local, note: endpoints.public ? L('只在这台服务器上能用（dsh 自己用的就是它）', 'Only works on this server (dsh itself uses it)') : L('只在这台电脑上能用', 'Only works on this computer') },
+        ...(external ? [{ id: 'public', name: L('外部地址', 'Public'), url: external, note: L('你的电脑、手机或其他软件用这个，只认 API key。如果 dsh 前面的网关要求先登录，外部软件会被挡在网关外', 'Use this from your computer, phone or other tools; only the API key is checked. If a gateway in front of dsh requires sign-in, outside tools are stopped there') }] : []),
+        { id: 'local', name: L('本机地址', 'Local'), url: endpoints.local, note: remote ? L('只在这台服务器上能用（dsh 自己用的就是它）', 'Only works on this server (dsh itself uses it)') : L('只在这台电脑上能用', 'Only works on this computer') },
       ] : []
       return h('div', { style: S.section },
         h('div', { style: S.h }, 'API Key'),
@@ -500,8 +510,7 @@ window.__ModuleLoader__.load({
         try {
           const r0 = await api('POST', '/panel/open')
           // 在本机打开 dsh（地址是回环）：直接连本机的服务。远程浏览器（VPS 上的 dsh）：走 dsh 自己网页服务下的入口，先过 dsh 登录
-          const loopback = ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(window.location.hostname)
-          const r = loopback ? { ...r0, remote: false } : { ...r0, remote: true, url: `${window.location.origin}${PANEL_PREFIX}/management.html`, apiBase: `${window.location.origin}${PANEL_PREFIX}` }
+          const r = isLoopbackPage() ? { ...r0, remote: false } : { ...r0, remote: true, url: `${pageOrigin()}${PANEL_PREFIX}/management.html`, apiBase: `${pageOrigin()}${PANEL_PREFIX}` }
           let opened = false
           // 只有拿到能直接打开的地址才开窗口（VPS 上还没有受保护入口时不开，免得闪一下空白页）
           if (r.url && r.running) {

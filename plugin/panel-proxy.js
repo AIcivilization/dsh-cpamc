@@ -4,6 +4,7 @@
 //   /dsh-cpamc/panel/management.html      锁定版本的管理界面（~/.dsh-cpamc/static/management.html）
 //   /dsh-cpamc/panel/<其余路径>            去掉前缀转给本机引擎（填「自定义连接地址」时用）
 //   /v0/management/* /v0/resource/* /v8/management/*   原样转给本机引擎：管理界面默认连页面所在的域名，不用改地址
+//   /dsh-cpamc/v1/*                       其他设备的 OpenAI 兼容地址：不过 dsh 登录，只认模型 API key
 // 每个请求先过 dsh 自己的登录校验（ctx.connection.admit：信任围栏 + 认证，dsh 的 /api 也用它），写请求还要同源；
 // dsh 的登录 Cookie 不转给引擎。管理接口照样要管理密钥——这里多加的一层是 dsh 登录。
 // 不依赖 dsh-vps 或任何别的产品：dsh 前面是什么反向代理都一样。
@@ -13,6 +14,8 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 export const PANEL_PREFIX = '/dsh-cpamc/panel'
+/** 其他设备上的软件用的 OpenAI 兼容地址：<dsh 网址>/dsh-cpamc/v1。只认模型 API key，不要求 dsh 登录 */
+export const V1_PREFIX = '/dsh-cpamc/v1'
 /** 管理界面直接请求的引擎路径（默认连接地址 = 页面所在的域名） */
 export const ENGINE_PREFIXES = ['/v0/management', '/v0/resource', '/v8/management']
 
@@ -65,6 +68,7 @@ function forward(req, res, port, path) {
  */
 export function panelHandler(connection, home, kind) {
   return async (req, res) => {
+    if (kind === 'v1') return modelApi(req, res, home)
     let admission
     try {
       admission = connection.admit(req)
@@ -104,6 +108,27 @@ export function panelHandler(connection, home, kind) {
 }
 
 /**
+ * 模型接口：外部软件没有 dsh 的登录会话，所以不过 dsh 登录，鉴权交给引擎（/v1 始终要 API key，空 key 一律 401）。
+ * 只转 /v1 下的路径，不碰管理接口；Cookie 不转。
+ */
+async function modelApi(req, res, home) {
+  const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+  const rest = url.pathname.slice(V1_PREFIX.length)
+  if (rest !== '' && !rest.startsWith('/')) return deny(res, 404, 'not found')
+  if (!/^Bearer\s+\S+/i.test(String(req.headers.authorization ?? '')) && !req.headers['x-api-key']) {
+    res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    return res.end(JSON.stringify({ error: { message: 'missing API key (Authorization: Bearer <key>)', type: 'unauthorized' } }))
+  }
+  let port
+  try {
+    port = await enginePort(home())
+  } catch {
+    return deny(res, 503, 'dsh-cpamc is not set up yet')
+  }
+  return forward(req, res, port, `/v1${rest}${url.search}`)
+}
+
+/**
  * 注册全部路由；返回反注册函数列表。某个引擎前缀被别的插件占了就跳过（管理界面里填自定义地址也能用）。
  * @returns {{ disposers: (() => void)[]; enginePrefixes: string[] }}
  */
@@ -111,6 +136,7 @@ export function registerPanelRoutes(ws, connection, home, log = () => {}) {
   const disposers = []
   const enginePrefixes = []
   disposers.push(ws.register({ kind: 'prefix', path: PANEL_PREFIX, handler: panelHandler(connection, home, 'panel') }))
+  disposers.push(ws.register({ kind: 'prefix', path: V1_PREFIX, handler: panelHandler(connection, home, 'v1') }))
   for (const p of ENGINE_PREFIXES) {
     try {
       disposers.push(ws.register({ kind: 'prefix', path: p, handler: panelHandler(connection, home, 'engine') }))

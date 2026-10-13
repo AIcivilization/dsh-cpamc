@@ -11,11 +11,11 @@ interface Mod {
   __test: Record<string, Comp> & { statusOf: (s: object) => { text: string } }
 }
 
-function load(lang: string): Mod {
+function load(lang: string, location?: { hostname: string; origin: string }): Mod {
   const src = readFileSync(join(__dirname, '../../plugin/client.js'), 'utf8')
   let mod: Mod | undefined
   runInNewContext(src, {
-    window: { __ModuleLoader__: { load: ({ factory }: { factory: (req: (n: string) => unknown) => Mod }) => (mod = factory(() => React)) } },
+    window: { ...(location ? { location } : {}), __ModuleLoader__: { load: ({ factory }: { factory: (req: (n: string) => unknown) => Mod }) => (mod = factory(() => React)) } },
     document: { documentElement: { lang } },
     navigator: {},
     console,
@@ -85,6 +85,14 @@ describe('settings page rendering', () => {
       expect(render(m, 'SettingsSection', {})).toContain('dsh-cpamc')
     })
   }
+
+  it('shows the dsh-address model endpoint when opened from a remote browser', () => {
+    const m = load('en', { hostname: 'dsh.example.com', origin: 'https://dsh.example.com' })
+    const html = render(m, 'KeysSection', { info: { keys: [], foreign: 0 }, endpoints: { local: 'http://127.0.0.1:8317/v1' }, reload: noop })
+    expect(html).toContain('https://dsh.example.com/dsh-cpamc/v1')
+    const local = render(load('en', { hostname: '127.0.0.1', origin: 'http://127.0.0.1:3080' }), 'KeysSection', { info: { keys: [], foreign: 0 }, endpoints: { local: 'http://127.0.0.1:8317/v1' }, reload: noop })
+    expect(local).not.toContain('/dsh-cpamc/v1')
+  })
 
   it('source status labels', () => {
     const m = load('en')

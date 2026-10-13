@@ -21,9 +21,7 @@ import { detectProxy, normalizeProxyUrl, redactProxy } from '../util/proxy.js'
 import { ensureDaemon } from '../daemon/service.js'
 import { dshModelHome, dshModelPorts, freePortAvoiding } from './migrate.js'
 import { installDshPlugin } from '../integrations/dshplugin.js'
-import { enableCaddy } from './remote.js'
 import { installAdmin } from '../service/admin.js'
-import { DEFAULT_PUBLIC_PORT, publicHost } from '../remote/public.js'
 
 export interface SetupOptions {
   port?: number
@@ -86,21 +84,7 @@ export async function setup(ctx: Ctx, opts: SetupOptions): Promise<number> {
     // vps：让 dsh 管理页能直接点「更新 / 卸载」（root 执行，只认这两件事）
     if (ctx.mode === 'vps' && !ctx.serviceDisabled) await step('admin', () => installAdmin(ctx))
 
-    // vps：自动在 dsh 的域名上开对外端点（没有域名就用 IP），自己的其他设备直接能用
-    if (ctx.mode === 'vps') {
-      info('')
-      info(bold(L('对外端点', 'Public endpoint')))
-      if (all.state.remote?.mode && all.state.remote.mode !== 'off' && all.state.remote.mode !== 'caddy') skip(L(`已用 ${all.state.remote.mode} 方式开放，保持不变`, `Already exposed via ${all.state.remote.mode}; unchanged`))
-      else
-        await step('public-endpoint', async () => {
-          const host = await publicHost(all.config.remote.domain)
-          const port = all.config.remote.publicPort ?? DEFAULT_PUBLIC_PORT
-          await enableCaddy(ctx, all, host, port)
-          all.config.remote.domain = host
-          all.config.remote.publicPort = port
-          ok(`https://${host}:${port}/v1`)
-        })
-    }
+    // 其他设备的模型地址经 dsh 自己的网址提供（<dsh 网址>/dsh-cpamc/v1，插件宿主端），不再往服务器上已有的 Caddy 里加站点
 
     info('')
     info(bold(L('同步到 dsh', 'Sync to dsh')))
@@ -123,7 +107,7 @@ export async function setup(ctx: Ctx, opts: SetupOptions): Promise<number> {
     info('')
     if (failures.length) warn(L(`有 ${failures.length} 项没完成：${failures.join('、')}。修好后重新执行 dsh-cpamc setup 即可`, `${failures.length} item(s) not done: ${failures.join(', ')}. Fix them and re-run dsh-cpamc setup`))
     const base = all.state.remote?.mode === 'caddy' && all.state.remote.publicUrl ? all.state.remote.publicUrl : `http://127.0.0.1:${all.config.port}/v1`
-    next(L(`在 dsh 的模型列表里选 dsh-cpamc 下的模型。其他软件：Base URL ${base}，key 用 dsh-cpamc key add <名称> 领取`, `Pick a dsh-cpamc model in dsh. Other software: Base URL ${base}, get a key with dsh-cpamc key add <name>`))
+    next(L(`在 dsh 的模型列表里选 dsh-cpamc 下的模型。本机其他软件：Base URL ${base}；其他设备：<你的 dsh 网址>/dsh-cpamc/v1。key 用 dsh-cpamc key add <名称> 领取`, `Pick a dsh-cpamc model in dsh. Software on this machine: Base URL ${base}; other devices: <your dsh address>/dsh-cpamc/v1. Get a key with dsh-cpamc key add <name>`))
     info(L('  登录来源：在 dsh 的「设置 → dsh-cpamc」里点「全部功能」，或执行 dsh-cpamc panel', '  Sign in to sources: Settings → dsh-cpamc → All features in dsh, or run dsh-cpamc panel'))
     return failures.length ? 1 : 0
   })
