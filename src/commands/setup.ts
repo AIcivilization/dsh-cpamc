@@ -6,6 +6,7 @@ import type { Ctx } from '../context.js'
 import { requireRootInVps } from '../context.js'
 import { locateDsh } from '../dsh/locate.js'
 import { listModels, unauthStatus, waitHealthy } from '../engine/client.js'
+import { installPanel, installPlugins } from '../engine/components.js'
 import { activateVersion, currentVersion, fetchUpstreamAsset, installVersion, loadManifest, platformTarget } from '../engine/install.js'
 import { DshModelError, isDshModelError } from '../errors.js'
 import { L } from '../i18n.js'
@@ -154,6 +155,13 @@ export async function ensureEngine(ctx: Ctx, all: All, opts: { port?: number } =
   if (!state.engine.versions.includes(version)) state.engine.versions.push(version)
   ;(installed ? ok : skip)(L(`引擎 v${version}${installed ? ' 已下载并校验' : ' 已安装'}`, `Engine v${version} ${installed ? 'downloaded and verified' : 'already installed'}`))
 
+  // 渠道插件包（四个 IDE 来源）与完整管理界面：和引擎一样锁版本、校验 sha256
+  const pluginsNew = await installPlugins(ctx, manifest.plugins)
+  ;(pluginsNew ? ok : skip)(L(`渠道插件包 v${manifest.plugins.version}（WorkBuddy、Trae、Qoder、ZCode）${pluginsNew ? '已下载并校验' : '已安装'}`, `Channel plugins v${manifest.plugins.version} (WorkBuddy, Trae, Qoder, ZCode) ${pluginsNew ? 'downloaded and verified' : 'already installed'}`))
+  const panelNew = await installPanel(ctx, manifest.panel)
+  ;(panelNew ? ok : skip)(L(`完整管理界面 v${manifest.panel.version}${panelNew ? ' 已下载并校验' : ' 已安装'}`, `Full management interface v${manifest.panel.version} ${panelNew ? 'downloaded and verified' : 'already installed'}`))
+  state.components = { plugins: manifest.plugins.version, panel: manifest.panel.version }
+
   const { created } = ensureDshKey(keys)
   if (created) await saveKeys(ctx, keys)
 
@@ -173,7 +181,8 @@ export async function ensureEngine(ctx: Ctx, all: All, opts: { port?: number } =
     await svc.install()
     state.service = { kind: svc.kind, file: svc.spec.file, label: svc.spec.label }
     await saveAll(ctx, all)
-    if (installed) await svc.restart()
+    // 引擎只在启动时加载渠道插件：引擎或插件包换了版本都要重启
+    if (installed || pluginsNew) await svc.restart()
   }
   if (!(await waitHealthy(config.port, ctx.serviceDisabled ? 1500 : 15_000))) {
     if (ctx.serviceDisabled) {

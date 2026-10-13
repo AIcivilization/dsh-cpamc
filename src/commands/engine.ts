@@ -9,14 +9,13 @@ import YAML from 'yaml'
 import type { Ctx } from '../context.js'
 import { requireRootInVps } from '../context.js'
 import { listModels, waitHealthy } from '../engine/client.js'
-import { renderEngineConfig } from '../engine/config.js'
 import { activateVersion, currentVersion, fetchUpstreamAsset, installVersion, loadManifest, platformTarget, probeBinaryVersion, versionBinary, currentBinary } from '../engine/install.js'
 import { DshModelError } from '../errors.js'
 import { L } from '../i18n.js'
 import { dshKey, loadAll, saveAll } from '../ops.js'
 import { serviceFor } from '../service/index.js'
 import { withLock } from '../state.js'
-import { atomicWrite } from '../util/fs.js'
+import { atomicWrite, readText } from '../util/fs.js'
 import { info, ok, warn } from '../util/output.js'
 import { findFreePort } from '../util/port.js'
 
@@ -102,10 +101,13 @@ async function trialRun(ctx: Ctx, all: Awaited<ReturnType<typeof loadAll>>, bin:
   try {
     await cp(ctx.paths.auth, join(dir, 'auth'), { recursive: true, filter: (src) => !src.includes('/logs') })
     const port = await findFreePort(all.config.port + 100)
-    const doc = YAML.parse(renderEngineConfig(ctx, all.config, all.keys, port))
-    doc.oauth['auth-dir'] = join(dir, 'auth')
+    // 用当前的真实配置试跑（含完整管理界面里改过的设置），只换端口与凭据目录，不开控制台
+    const doc = YAML.parseDocument((await readText(ctx.paths.engineYaml)) ?? '')
+    doc.setIn(['server', 'port'], port)
+    doc.setIn(['oauth', 'auth-dir'], join(dir, 'auth'))
+    doc.setIn(['management', 'disable-control-panel'], true)
     const cfg = join(dir, 'engine.yaml')
-    await atomicWrite(cfg, YAML.stringify(doc))
+    await atomicWrite(cfg, doc.toString())
     const child = spawn(bin, ['-config', cfg], { cwd: dir, stdio: 'ignore', windowsHide: true })
     try {
       if (!(await waitHealthy(port, 15_000))) throw new DshModelError('engine_trial_failed', L('新版本试运行没有启动', 'New version did not start in trial run'))

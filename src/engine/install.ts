@@ -30,6 +30,10 @@ export interface Manifest {
   license: string
   version: string
   assets: Record<string, ManifestAsset>
+  /** 渠道插件包（四个 IDE 来源） */
+  plugins: import('./components.js').PluginsManifest
+  /** 完整管理界面 */
+  panel: import('./components.js').PanelManifest
 }
 
 export async function loadManifest(): Promise<Manifest> {

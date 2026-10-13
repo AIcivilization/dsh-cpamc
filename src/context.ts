@@ -28,6 +28,10 @@ export interface Paths {
   engineDir: string
   versionsDir: string
   current: string
+  /** 渠道插件包：plugins/<版本>/ */
+  pluginsDir: string
+  /** 锁定版本的完整管理界面（引擎从这里提供 /management.html） */
+  panelFile: string
   auth: string
   replaced: string
   backups: string
@@ -70,6 +74,9 @@ export function makePaths(home: string): Paths {
     engineDir,
     versionsDir: join(engineDir, 'versions'),
     current: join(engineDir, 'current'),
+    pluginsDir: join(engineDir, 'plugins'),
+    // 引擎把管理页放在配置文件所在目录的 static/ 下（实测 v8.0.13，与工作目录无关）
+    panelFile: join(home, 'static', 'management.html'),
     auth,
     replaced: join(auth, '.replaced'),
     backups: join(home, 'backups'),

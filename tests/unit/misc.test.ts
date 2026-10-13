@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { compareVersions, isCompatible } from '../../src/dsh/locate.js'
-import { renderEngineConfig } from '../../src/engine/config.js'
+import { writeEngineConfig } from '../../src/engine/config.js'
 import { platformTarget } from '../../src/engine/install.js'
 import { L, initLang } from '../../src/i18n.js'
 import { addKey, revokeKey, type KeyStore } from '../../src/keys.js'
-import { defaultConfig } from '../../src/state.js'
+import { defaultConfig, type State } from '../../src/state.js'
 import { getUpstream } from '../../src/upstreams.js'
 import { redactKey } from '../../src/util/redact.js'
+import { readFile } from 'node:fs/promises'
 import YAML from 'yaml'
 import { tempCtx } from './helpers.js'
 
@@ -22,28 +23,34 @@ describe('versions', () => {
 })
 
 describe('engine config', () => {
-  it('refuses to render with no active keys', async () => {
+  const fresh = (): State => ({ engine: { versions: [] } })
+
+  it('refuses to write with no active keys', async () => {
     const { ctx } = await tempCtx()
     const keys: KeyStore = { keys: [] }
-    expect(() => renderEngineConfig(ctx, defaultConfig(), keys)).toThrow()
+    await expect(writeEngineConfig(ctx, defaultConfig(), keys, fresh())).rejects.toThrow()
     addKey(keys, 'dsh')
     revokeKey(keys, 'dsh')
-    expect(() => renderEngineConfig(ctx, defaultConfig(), keys)).toThrow()
+    await expect(writeEngineConfig(ctx, defaultConfig(), keys, fresh())).rejects.toThrow()
   })
 
-  it('binds loopback, disables management, lists only active keys', async () => {
+  it('binds loopback, opens management locally, lists only active keys; a second write is a no-op', async () => {
     const { ctx } = await tempCtx()
     const keys: KeyStore = { keys: [] }
     const a = addKey(keys, 'dsh')
     addKey(keys, 'laptop')
     revokeKey(keys, 'laptop')
-    const doc = YAML.parse(renderEngineConfig(ctx, defaultConfig(), keys))
+    const state = fresh()
+    expect((await writeEngineConfig(ctx, defaultConfig(), keys, state)).written).toBe(true)
+    const doc = YAML.parse(await readFile(ctx.paths.engineYaml, 'utf8'))
     expect(doc['config-version']).toBe(8)
     expect(doc.server.host).toBe('127.0.0.1')
-    expect(doc.management['secret-key']).toBe('')
+    expect(doc.management['secret-key']).toMatch(/^dshg_/)
     expect(doc.management['allow-remote']).toBe(false)
     expect(doc.access['api-keys']).toEqual([a.key])
     expect(doc.oauth['auth-dir']).toBe(ctx.paths.auth)
+    expect(state.engineOwned?.keys).toHaveLength(1)
+    expect((await writeEngineConfig(ctx, defaultConfig(), keys, state)).written).toBe(false)
   })
 })
 
@@ -76,9 +83,11 @@ describe('proxy', () => {
     const { ctx } = await tempCtx()
     const keys: KeyStore = { keys: [] }
     addKey(keys, 'dsh')
-    const doc = YAML.parse(renderEngineConfig(ctx, { ...defaultConfig(), proxy: 'http://127.0.0.1:1082' }, keys))
-    expect(doc.requests['proxy-url']).toBe('http://127.0.0.1:1082')
-    expect(YAML.parse(renderEngineConfig(ctx, { ...defaultConfig(), proxy: null }, keys)).requests).toBeUndefined()
+    const state: State = { engine: { versions: [] } }
+    await writeEngineConfig(ctx, { ...defaultConfig(), proxy: 'http://127.0.0.1:1082' }, keys, state)
+    expect(YAML.parse(await readFile(ctx.paths.engineYaml, 'utf8')).requests['proxy-url']).toBe('http://127.0.0.1:1082')
+    await writeEngineConfig(ctx, { ...defaultConfig(), proxy: null }, keys, state)
+    expect(YAML.parse(await readFile(ctx.paths.engineYaml, 'utf8')).requests?.['proxy-url']).toBeUndefined()
   })
 })
 

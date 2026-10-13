@@ -3,31 +3,20 @@
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { main } from '../../src/cli.js'
 import { healthy, listModels, unauthStatus, waitHealthy } from '../../src/engine/client.js'
-import { currentBinary, loadManifest, platformTarget, probeBinaryVersion } from '../../src/engine/install.js'
+import { currentBinary, loadManifest, probeBinaryVersion } from '../../src/engine/install.js'
+import { sha256File } from '../../src/util/fs.js'
+import YAML from 'yaml'
+import { componentEnv } from './cache.js'
 import { loadKeys } from '../../src/keys.js'
 import { loadConfig } from '../../src/state.js'
 import { tempCtx } from '../unit/helpers.js'
 
-const CACHE = join(__dirname, '..', '.cache')
 const fixture = (n: string) => readFile(join(__dirname, '../fixtures/dsh', n), 'utf8')
-
-async function cachedArchive(): Promise<string> {
-  const manifest = await loadManifest()
-  const asset = manifest.assets[platformTarget()]!
-  const file = join(CACHE, asset.file)
-  if (!existsSync(file)) {
-    await mkdir(CACHE, { recursive: true })
-    const res = await fetch(asset.url)
-    if (!res.ok) throw new Error(`download ${asset.url}: ${res.status}`)
-    await writeFile(file, Buffer.from(await res.arrayBuffer()))
-  }
-  return file
-}
 
 describe('engine contract (real binary)', () => {
   let t: Awaited<ReturnType<typeof tempCtx>>
@@ -36,14 +25,15 @@ describe('engine contract (real binary)', () => {
   const saved = { ...process.env }
 
   beforeAll(async () => {
-    t = await tempCtx({ DSH_CPAMC_ENGINE_ARCHIVE: await cachedArchive() })
+    const env = await componentEnv()
+    t = await tempCtx(env)
     Object.assign(process.env, {
+      ...env,
       DSH_CPAMC_MODE: 'local',
       DSH_CPAMC_HOME: t.ctx.paths.home,
       DSH_HOME: t.ctx.dshHome,
       DSH_CPAMC_DSH_VERSION: '0.2.0-rc.2',
       DSH_CPAMC_SERVICE: 'none',
-      DSH_CPAMC_ENGINE_ARCHIVE: t.ctx.env.DSH_CPAMC_ENGINE_ARCHIVE,
       DSH_CPAMC_LANG: 'en',
       DSH_CPAMC_NO_APP_DISCOVERY: '1',
     })
@@ -56,15 +46,17 @@ describe('engine contract (real binary)', () => {
     process.env = saved
   })
 
-  it('setup installs and verifies the pinned engine', async () => {
+  it('setup installs and verifies the pinned engine, channel plugins and management interface', async () => {
     const free = 19000 + Math.floor(Math.random() * 500)
     expect(await main(['setup', '--skip-dsh-plugin', '--port', String(free)])).toBe(0)
     port = (await loadConfig(t.ctx)).port
     const v = await probeBinaryVersion(currentBinary(t.ctx))
-    expect(v).toBe((await loadManifest()).version)
+    const manifest = await loadManifest()
+    expect(v).toBe(manifest.version)
+    expect(await sha256File(t.ctx.paths.panelFile)).toBe(manifest.panel.sha256)
   }, 120_000)
 
-  it('engine enforces keys, hides management, and serves models', async () => {
+  it('engine enforces keys, keeps management local, and serves models', async () => {
     child = spawn(currentBinary(t.ctx), ['-config', t.ctx.paths.engineYaml], { cwd: t.ctx.paths.home, stdio: 'ignore' })
     expect(await waitHealthy(port, 15_000)).toBe(true)
     expect(await unauthStatus(port)).toBe(401)
@@ -73,6 +65,34 @@ describe('engine contract (real binary)', () => {
     expect(res.status).toBe(401)
     const keys = await loadKeys(t.ctx)
     expect(await listModels(port, keys.keys[0]!.key)).toEqual([])
+  }, 30_000)
+
+  it('loads the four channel plugins and serves the pinned management interface', async () => {
+    const mgmt = JSON.parse(await readFile(join(t.ctx.paths.home, 'mgmt.json'), 'utf8')) as { secret: string }
+    const r = await fetch(`http://127.0.0.1:${port}/v0/management/plugins`, { headers: { Authorization: `Bearer ${mgmt.secret}` } })
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { plugins: { id: string; effective_enabled: boolean; supports_oauth: boolean }[] }
+    const on = body.plugins.filter((p) => p.effective_enabled).map((p) => p.id).sort()
+    expect(on).toEqual(['qoder', 'trae', 'workbuddy', 'zcode'])
+    expect(body.plugins.filter((p) => p.effective_enabled).every((p) => p.supports_oauth)).toBe(true)
+    const page = await fetch(`http://127.0.0.1:${port}/management.html`)
+    expect(page.status).toBe(200)
+    await page.arrayBuffer()
+    // 开着 disable-auto-update-panel：引擎不会把锁定版本换掉
+    expect(await sha256File(t.ctx.paths.panelFile)).toBe((await loadManifest()).panel.sha256)
+  }, 30_000)
+
+  it('keeps settings changed in the management interface when dsh-cpamc rewrites its own keys', async () => {
+    const doc = YAML.parseDocument(await readFile(t.ctx.paths.engineYaml, 'utf8'))
+    doc.setIn(['routing', 'strategy'], 'round-robin')
+    const keys = doc.getIn(['access', 'api-keys']) as { add: (v: unknown) => void }
+    keys.add('added-in-management-ui')
+    await writeFile(t.ctx.paths.engineYaml, doc.toString())
+    expect(await main(['key', 'add', 'tablet'])).toBe(0)
+    const after = YAML.parse(await readFile(t.ctx.paths.engineYaml, 'utf8'))
+    expect(after.routing.strategy).toBe('round-robin')
+    expect(after.access['api-keys']).toContain('added-in-management-ui')
+    expect(after.access['api-keys']).toContain((await loadKeys(t.ctx)).keys.find((k) => k.name === 'tablet')!.key)
   }, 30_000)
 
   it('key add hot-reloads into the engine; revoke removes it', async () => {

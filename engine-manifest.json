@@ -34,5 +34,49 @@
       "url": "https://github.com/router-for-me/CLIProxyAPI/releases/download/v8.0.13/CLIProxyAPI_8.0.13_windows_amd64.zip",
       "sha256": "7064ec8150511d0ece145a492968b476aa5abae3e1c7ef385852631918086bdd"
     }
+  },
+  "plugins": {
+    "version": "0.8.68",
+    "license": "MIT",
+    "ids": [
+      "workbuddy",
+      "trae",
+      "qoder",
+      "zcode"
+    ],
+    "assets": {
+      "darwin-aarch64": {
+        "file": "cpa-multi-plugins-darwin-arm64.zip",
+        "url": "https://github.com/mmqz/cpa-multi-plugins/releases/download/v0.8.68/cpa-multi-plugins-darwin-arm64.zip",
+        "sha256": "61d65b6b823b33cde3c429dc618e3cc0d725ab8ec7f45258ab8372f4d839dad3"
+      },
+      "darwin-amd64": {
+        "file": "cpa-multi-plugins-darwin-amd64.zip",
+        "url": "https://github.com/mmqz/cpa-multi-plugins/releases/download/v0.8.68/cpa-multi-plugins-darwin-amd64.zip",
+        "sha256": "494dbc90267660a19c75620280d34bf259edc8210de22f6304bccb7f571aade2"
+      },
+      "linux-aarch64": {
+        "file": "cpa-multi-plugins-linux-arm64.zip",
+        "url": "https://github.com/mmqz/cpa-multi-plugins/releases/download/v0.8.68/cpa-multi-plugins-linux-arm64.zip",
+        "sha256": "70a0437a5258f6e1985b75ca91c66cc354d3ed95b1e33b2fc2efb8591a21198b"
+      },
+      "linux-amd64": {
+        "file": "cpa-multi-plugins-linux-amd64.zip",
+        "url": "https://github.com/mmqz/cpa-multi-plugins/releases/download/v0.8.68/cpa-multi-plugins-linux-amd64.zip",
+        "sha256": "b54325f7c3426b0ca7083018e671af50f5e12b3311b42cefc2822cf573b910a5"
+      },
+      "windows-amd64": {
+        "file": "cpa-multi-plugins-windows-amd64.zip",
+        "url": "https://github.com/mmqz/cpa-multi-plugins/releases/download/v0.8.68/cpa-multi-plugins-windows-amd64.zip",
+        "sha256": "950d0d81a7f8a25f956e75160be7c05ca3c823b966d818e6bf2b92742d682cf3"
+      }
+    }
+  },
+  "panel": {
+    "version": "1.26.2",
+    "license": "MIT",
+    "file": "management.html",
+    "url": "https://github.com/router-for-me/Cli-Proxy-API-Management-Center/releases/download/v1.26.2/management.html",
+    "sha256": "808cfd05ce5766a0f3854f8e095e5c5ea6e4313399f2df0d52b7a40352be29df"
   }
 }

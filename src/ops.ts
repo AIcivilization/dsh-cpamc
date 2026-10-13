@@ -8,7 +8,7 @@ import { pickedFor } from './dsh/pick.js'
 import { writeEngineConfig } from './engine/config.js'
 import { DshModelError, isDshModelError } from './errors.js'
 import { L } from './i18n.js'
-import { DSH_KEY_NAME, findActive, loadKeys, type KeyStore } from './keys.js'
+import { DSH_KEY_NAME, findActive, loadKeys, saveKeys, type KeyStore } from './keys.js'
 import { loadConfig, loadState, saveConfig, saveState, type Config, type State } from './state.js'
 import { ok, skip, warn } from './util/output.js'
 
@@ -34,9 +34,15 @@ export function dshKey(keys: KeyStore): string {
   return k.key
 }
 
-/** 写 engine.yaml（内容变了才写，引擎热重载）。返回是否写了 */
+/** 写 engine.yaml（只动自己的键，内容变了才写，引擎热重载）。在完整管理界面里删掉的 key 同步成吊销。返回是否写了 */
 export async function applyEngineConfig(ctx: Ctx, all: All): Promise<boolean> {
-  return writeEngineConfig(ctx, all.config, all.keys)
+  const r = await writeEngineConfig(ctx, all.config, all.keys, all.state)
+  if (r.revoked.length) {
+    await saveKeys(ctx, all.keys)
+    warn(L(`这些 key 在完整管理界面里被删除了，已标记为吊销：${r.revoked.join('、')}`, `These keys were deleted in the full management interface and are now revoked: ${r.revoked.join(', ')}`))
+  }
+  await saveState(ctx, all.state)
+  return r.written
 }
 
 /**

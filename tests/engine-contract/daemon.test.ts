@@ -2,20 +2,19 @@
 // 六个来源的列表、显示 / 隐藏、命令行备用登录会话（拿链接后取消）、key 热生效。
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Daemon } from '../../src/daemon/core.js'
 import { listModels, waitHealthy } from '../../src/engine/client.js'
+import { installPanel, installPlugins } from '../../src/engine/components.js'
 import { writeEngineConfig } from '../../src/engine/config.js'
+import { componentEnv } from './cache.js'
 import { activateVersion, currentBinary, installVersion, loadManifest, platformTarget } from '../../src/engine/install.js'
 import { addKey, saveKeys, type KeyStore } from '../../src/keys.js'
 import { defaultConfig, saveConfig, saveState } from '../../src/state.js'
 import { findFreePort } from '../../src/util/port.js'
 import { tempCtx } from '../unit/helpers.js'
-
-const CACHE = join(__dirname, '..', '.cache')
 
 describe('daemon core against a real engine', () => {
   let engine: ChildProcess | undefined
@@ -29,15 +28,11 @@ describe('daemon core against a real engine', () => {
     const t = await tempCtx()
     process.env.DSH_CPAMC_HOME = t.ctx.paths.home
     const manifest = await loadManifest()
-    const asset = manifest.assets[platformTarget()]!
-    const file = join(CACHE, asset.file)
-    if (!existsSync(file)) {
-      await mkdir(CACHE, { recursive: true })
-      await writeFile(file, Buffer.from(await (await fetch(asset.url)).arrayBuffer()))
-    }
-    t.ctx.env.DSH_CPAMC_ENGINE_ARCHIVE = file
-    await installVersion(t.ctx, manifest.version, asset)
+    Object.assign(t.ctx.env, await componentEnv())
+    await installVersion(t.ctx, manifest.version, manifest.assets[platformTarget()]!)
     await activateVersion(t.ctx, manifest.version)
+    await installPlugins(t.ctx, manifest.plugins)
+    await installPanel(t.ctx, manifest.panel)
 
     port = await findFreePort(20100 + Math.floor(Math.random() * 300))
     const config = { ...defaultConfig(), port }
@@ -48,7 +43,7 @@ describe('daemon core against a real engine', () => {
     await saveState(t.ctx, { engine: { versions: [manifest.version] } })
 
     await mkdir(t.ctx.paths.auth, { recursive: true })
-    await writeEngineConfig(t.ctx, config, keys)
+    await writeEngineConfig(t.ctx, config, keys, { engine: { versions: [] } })
     engine = spawn(currentBinary(t.ctx), ['-config', t.ctx.paths.engineYaml], { cwd: t.ctx.paths.home, stdio: 'ignore' })
     expect(await waitHealthy(port, 15_000)).toBe(true)
     daemon = new Daemon(t.ctx)
