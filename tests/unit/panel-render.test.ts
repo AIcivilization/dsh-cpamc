@@ -77,7 +77,8 @@ describe('settings page rendering', () => {
       expect(svc).toContain('v0.8.68')
       expect(svc).toContain(zh ? '服务器' : 'Server')
       expect(svc).not.toContain(zh ? '重启服务' : 'Restart service')
-      const card = render(m, 'FullFeaturesCard', { openRef: { current: null } })
+      const card = render(m, 'FullFeaturesCard', { openRef: { current: null }, endpoints: { local: 'http://127.0.0.1:8317/v1' } })
+      expect(card).toContain('href="http://127.0.0.1:8317/management.html"')
       expect(card).toContain(zh ? '全部功能' : 'All features')
       expect(card).toContain(zh ? '复制登录密钥' : 'Copy sign-in key')
       expect(render(m, 'Onboarding', { code: 'daemon_not_configured', onDone: noop })).toContain(zh ? '一键准备' : 'Prepare now')
@@ -93,6 +94,22 @@ describe('settings page rendering', () => {
     expect(html).toContain('https://dsh.example.com/dsh-cpamc/v1')
     const local = render(load('en', { hostname: '127.0.0.1', origin: 'http://127.0.0.1:3080' }), 'KeysSection', { info: { keys: [], foreign: 0 }, endpoints: { local: 'http://127.0.0.1:8317/v1' }, reload: noop })
     expect(local).not.toContain('/dsh-cpamc/v1')
+  })
+
+  it('All features links through the dsh address from a remote browser', () => {
+    const m = load('en', { hostname: 'dsh.example.com', origin: 'https://dsh.example.com' })
+    expect(render(m, 'FullFeaturesCard', { openRef: { current: null }, endpoints: { local: 'http://127.0.0.1:8317/v1' } })).toContain('href="https://dsh.example.com/dsh-cpamc/panel/management.html"')
+  })
+
+  it('a crash inside the page stays inside the page', () => {
+    // 服务端渲染不走错误边界：直接验证它的两步——出错时记下错误，然后渲染成本页内的提示
+    const m = load('en')
+    const B = m.__test.Boundary as unknown as { new (p: object): { state: unknown; render: () => React.ReactElement }; getDerivedStateFromError: (e: Error) => unknown }
+    const b = new B({ children: null })
+    b.state = B.getDerivedStateFromError(new Error('boom in render'))
+    const html = renderToStaticMarkup(b.render())
+    expect(html).toContain('failed to render')
+    expect(html).toContain('boom in render')
   })
 
   it('source status labels', () => {

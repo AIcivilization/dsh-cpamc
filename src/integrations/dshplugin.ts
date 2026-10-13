@@ -4,6 +4,7 @@
 // 早先用 link: 指到 npm 全局目录：VPS 上那个目录归 root，之后从插件市场装就会 EACCES（实测），所以改掉。
 // 用户自己从市场 / GitHub 装的（依赖写法不是我们的）就不动它。卸载时只移除 dsh-cpamc 装的那份。
 
+import { fixReleaseAgeExcludes } from '../dsh/pnpm-policy.js'
 import { lstat, realpath, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Ctx } from '../context.js'
@@ -13,6 +14,7 @@ import { DshModelError } from '../errors.js'
 import { L } from '../i18n.js'
 import type { All } from '../ops.js'
 import { pkgVersion } from '../util/pkg.js'
+import { ensureDir } from '../util/fs.js'
 import { ok, skip } from '../util/output.js'
 
 export const PLUGIN_NAME = 'dsh-cpamc'
@@ -67,6 +69,14 @@ export async function installDshPlugin(ctx: Ctx, all: All, opts: { version?: str
     if ((await lstat(linkPath)).isSymbolicLink()) await unlink(linkPath)
   } catch {
     // 不存在
+  }
+  // pnpm 例外名单里同一个包写成了多行时只认第一行，锁文件检查会因此失败：先合并（改前备份，见 dsh/pnpm-policy.ts）
+  try {
+    await ensureDir(ctx.paths.backups, { owner: ctx.owner })
+    const backup = await fixReleaseAgeExcludes(join(ctx.dshHome, 'profiles', profile), ctx.paths.backups)
+    if (backup) ok(L(`已合并 dsh profile 里 pnpm 例外名单的重复条目（原文件备份在 ${backup}）`, `Merged duplicate entries in the dsh profile's pnpm exclude list (backup: ${backup})`))
+  } catch {
+    // 修不了就照常装：失败时下面会给出说明
   }
   const code = await dshPlugin(ctx, profile, ['add', want.install, '--config.strict-dep-builds=false'], all.config.proxy)
   const installed = await profileHasDependency(ctx, profile, PLUGIN_NAME)

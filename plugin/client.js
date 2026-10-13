@@ -569,34 +569,27 @@ window.__ModuleLoader__.load({
 
     // —— 「全部功能」卡片（R4）——
     const PANEL_PREFIX = '/dsh-cpamc/panel'
-    function FullFeaturesCard({ openRef }) {
-      const [res, setRes] = useState(null)
+    /** 「全部功能」的地址：本机打开 dsh 时直连本机服务；远程浏览器经 dsh 自己的网址（先过 dsh 登录） */
+    function panelTarget(endpoints) {
+      if (!isLoopbackPage()) return { url: `${pageOrigin()}${PANEL_PREFIX}/management.html`, apiBase: `${pageOrigin()}${PANEL_PREFIX}`, remote: true }
+      const local = String(endpoints?.local || '').replace(/\/v1\/?$/, '')
+      return local ? { url: `${local}/management.html`, apiBase: local, remote: false } : null
+    }
+
+    function FullFeaturesCard({ openRef, endpoints }) {
       const [err, setErr] = useState('')
-      const [busy, setBusy] = useState(false)
-      const open = async () => {
+      const target = panelTarget(endpoints)
+      // 点链接时顺手确认服务在跑（服务没起来时会尝试启动）；链接本身是普通链接，不会被浏览器当成弹窗拦掉
+      const ensure = async () => {
         setErr('')
-        setBusy(true)
         try {
-          const r0 = await api('POST', '/panel/open')
-          // 在本机打开 dsh（地址是回环）：直接连本机的服务。远程浏览器（VPS 上的 dsh）：走 dsh 自己网页服务下的入口，先过 dsh 登录
-          const r = isLoopbackPage() ? { ...r0, remote: false } : { ...r0, remote: true, url: `${pageOrigin()}${PANEL_PREFIX}/management.html`, apiBase: `${pageOrigin()}${PANEL_PREFIX}` }
-          let opened = false
-          // 只有拿到能直接打开的地址才开窗口（VPS 上还没有受保护入口时不开，免得闪一下空白页）
-          if (r.url && r.running) {
-            try {
-              const w = window.open(r.url, '_blank')
-              if (w) { w.opener = null; opened = true }
-            } catch { opened = false }
-          }
-          setRes({ ...r, opened })
-          if (!r.running) setErr(L('模型服务没有起来，先在「服务」里点「修复」。', 'The model service is not running; press Repair under Service first.'))
+          const r = await api('POST', '/panel/open')
+          if (!r.running) setErr(L('模型服务没有起来，先在「服务」里点「修复」，再打开。', 'The model service is not running; press Repair under Service, then open it again.'))
         } catch (e) {
           setErr(e.message)
-        } finally {
-          setBusy(false)
         }
       }
-      useEffect(() => { if (openRef) openRef.current = open })
+      useEffect(() => { if (openRef) openRef.current = () => { void ensure(); if (target) { try { window.open(target.url, '_blank', 'noopener') } catch { /* 拦截了就让用户点链接 */ } } } })
       return h('div', { style: S.section },
         h('div', { style: { ...S.card, padding: '14px 16px' } },
           h('div', { style: S.line },
@@ -604,16 +597,15 @@ window.__ModuleLoader__.load({
               h('div', { style: S.label }, L('全部功能', 'All features')),
               h('div', { style: { ...S.meta, marginTop: 2 } }, L('需要登录来源账号、修改完整配置、调整路由或查看详细日志？打开原版完整管理界面，它管理的就是为 dsh 提供模型的这个服务。',
                 'Need to sign in to sources, change the full configuration, adjust routing or read detailed logs? Open the original full management interface; it manages the very service that provides dsh\'s models.'))),
-            h('button', { type: 'button', style: S.btnPrimary, disabled: busy, onClick: open }, busy ? L('正在打开…', 'Opening…') : L('全部功能', 'All features'))),
+            target
+              ? h('a', { href: target.url, target: '_blank', rel: 'noopener noreferrer', onClick: () => void ensure(), style: { ...S.btnPrimary, textDecoration: 'none', display: 'inline-block' } }, L('全部功能', 'All features'))
+              : h('span', { style: S.meta }, L('服务地址还没读到', 'Service address not available yet'))),
           h('div', { style: { ...S.line, marginTop: 10 } },
             h('span', { style: { ...S.meta, ...S.grow } }, L('打开后在登录页填入管理密钥：点右边复制（不会显示出来，30 秒后自动从剪贴板清除）。', 'On its sign-in page, paste the management key: copy it with the button on the right (never displayed; cleared from the clipboard after 30 seconds).')),
             h(CopyButton, { get: async () => (await api('POST', '/panel/key')).key, label: L('复制登录密钥', 'Copy sign-in key'), clearAfter: 30_000 })),
-          res && res.url && res.running && !res.opened ? h('div', { style: { ...S.meta, marginTop: 8 } },
-            L('浏览器没有自动打开新窗口，点这里打开：', 'The browser did not open a new window; open it here: '),
-            h('a', { href: res.url, target: '_blank', rel: 'noopener noreferrer', style: { color: C.accent } }, res.url)) : null,
-          res?.remote ? h('div', { style: { ...S.meta, marginTop: 8 } },
+          target?.remote ? h('div', { style: { ...S.meta, marginTop: 8 } },
             L('如果登录页提示连不上服务，勾选「自定义连接地址」，填入：', 'If the sign-in page cannot reach the service, tick "custom connection address" and enter:'),
-            h('div', { style: { ...S.line, marginTop: 4 } }, h('code', { style: { ...S.mono, ...S.grow } }, res.apiBase), h(CopyButton, { get: res.apiBase }))) : null,
+            h('div', { style: { ...S.line, marginTop: 4 } }, h('code', { style: { ...S.mono, ...S.grow } }, target.apiBase), h(CopyButton, { get: target.apiBase }))) : null,
           err ? h('div', { style: { fontSize: 12, color: C.err, marginTop: 6 } }, err) : null))
     }
 
@@ -732,9 +724,34 @@ window.__ModuleLoader__.load({
         h(KeysSection, { key: 'keys', info: data.keys, endpoints: data.endpoints, reload: () => load(false) }),
         h(ServiceSection, { key: 'service', service: data.service, reload: load }),
         isLoopbackPage() ? h(DeploySection, { key: 'deploy' }) : null,
-        h(FullFeaturesCard, { key: 'full', openRef: openPanel }),
+        h(FullFeaturesCard, { key: 'full', openRef: openPanel, endpoints: data.endpoints }),
       ])
     }
+
+    /** 这一页渲染出错时只在这一页显示原因，不连累 dsh 的设置窗口（白屏、别的设置页打不开） */
+    // 宿主的 React 没有 Component（不该发生）时退回不带保护的页面，也不能在加载时就崩
+    const Boundary = typeof React.Component !== 'function' ? null : class extends React.Component {
+      constructor(props) {
+        super(props)
+        this.state = { error: null }
+      }
+      static getDerivedStateFromError(error) {
+        return { error }
+      }
+      componentDidCatch(error) {
+        console.warn('[dsh-cpamc] settings page crashed', error)
+      }
+      render() {
+        if (!this.state.error) return this.props.children
+        const msg = String(this.state.error?.stack || this.state.error?.message || this.state.error).slice(0, 1500)
+        return h('div', { style: { color: C.text, maxWidth: 860 } },
+          h('div', { style: S.h }, 'dsh-cpamc'),
+          h('p', { style: { ...S.note, color: C.err } }, L('这一页显示出错了（dsh 的其他功能不受影响）。把下面的信息发给开发者，或点「重试」。', 'This page failed to render (the rest of dsh is unaffected). Send the details below to the developer, or press Retry.')),
+          h('pre', { style: { ...S.mono, ...S.card, padding: 10, maxHeight: 240, overflow: 'auto', whiteSpace: 'pre-wrap', margin: '0 0 10px' } }, msg),
+          h('button', { type: 'button', style: S.btn, onClick: () => this.setState({ error: null }) }, L('重试', 'Retry')))
+      }
+    }
+    const SafeSettingsSection = Boundary ? () => h(Boundary, null, h(SettingsSection)) : SettingsSection
 
     const name = 'dsh-cpamc'
     // 用到的服务必须先声明，否则 ctx.slots 读不到
@@ -742,13 +759,13 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       try {
         ctx.slots.inject('settings.section', () =>
-          ctx.slots.register({ name: 'settings.section', id: 'dsh-cpamc', order: 25, label: () => 'dsh-cpamc' }, SettingsSection))
+          ctx.slots.register({ name: 'settings.section', id: 'dsh-cpamc', order: 25, label: () => 'dsh-cpamc' }, SafeSettingsSection))
       } catch (error) {
         console.warn('[dsh-cpamc] 设置页注册失败', error)
       }
     }
 
-    module.exports = { name, inject, apply, __test: { until, pct, ms, statusOf, newer, Header, ModelsSection, KeysSection, ServiceSection, FullFeaturesCard, Onboarding, SelfProgress, SettingsSection, DeploySection } }
+    module.exports = { name, inject, apply, __test: { until, pct, ms, statusOf, newer, Boundary, panelTarget, Header, ModelsSection, KeysSection, ServiceSection, FullFeaturesCard, Onboarding, SelfProgress, SettingsSection, DeploySection } }
     return module.exports
   },
 })
