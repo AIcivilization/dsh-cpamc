@@ -129,7 +129,10 @@ describe('engine contract (real binary)', () => {
     if (child && child.exitCode === null) {
       const exited = new Promise((r) => child!.once('exit', r))
       child.kill()
+      // 引擎优雅退出时会等后台的网络请求（启动时刷新模型目录），网络慢时要将近 30 秒：5 秒还没退就强杀
+      const force = setTimeout(() => child?.kill('SIGKILL'), 5000)
       await exited
+      clearTimeout(force)
     }
     child = undefined
     expect(await main(['uninstall', '--yes'])).toBe(0)
