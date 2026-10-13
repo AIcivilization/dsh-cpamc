@@ -1,390 +1,312 @@
 # dsh-cpamc 设计方案
 
-> 状态：设计稿，尚未实现。
-> 版本：0.1.0 的目标设计。
+> 状态：方案（2026-10-13）。基于 [dsh-model](https://github.com/AIcivilization/dsh-model) 的**增量方案**：凡是本文没有提到的部分，一律沿用 dsh-model 的现有实现和设计（见其 `docs/DESIGN.md` 与 `docs/M0-findings.md`）。
+>
+> 写作约定：对外的说明、README 和界面里，只出现 dsh-cpamc、dsh-model、dsh-vps、DSH、CPA / CPAMC 和各来源的官方名称，不出现借鉴过的其他产品名称。
 
----
+## 0. 一句话
 
-## 1. 目标
+dsh-cpamc = dsh-model 的引擎与 DSH 接线 + CPA 渠道插件提供的四个 IDE 来源 + 一个精简的 DSH 设置面板 + 一张打开原版 CPAMC 的「全部功能」卡片。
 
-让一个**只有 DSH** 的人，不用碰命令行、不用装任何别的东西，就能拿到一套完整可用的
-CLIProxyAPI（下称 CPA）+ CPAMC 管理界面。
+dsh-cpamc 为 DSH 提供模型。CPA（服务端）承载模型请求和全部来源，原版 CPAMC（CPA 自带的网页管理界面）负责登录和完整设置。dsh-cpamc 负责省掉用户自己安装、配置、接线这些步骤，并在 DSH 里给出日常需要的那一小部分。
 
-具体说，装上插件之后用户应该能：
+## 1. 用户要求（定稿，实现不得删减）
 
-1. 在 DSH 里点一下，打开**完整的 CPAMC 界面**（官方那一套，不是子集）
-2. 引擎、配置、密钥、端口都由插件备好，用户不需要知道这些东西存在
-3. 如果机器上已经有 CPA 在跑，可以选择**附着**上去，而不是再起一个
+| # | 要求 |
+|---|---|
+| R1 | dsh-cpamc **为 DSH 提供模型**：已登录、已完成设置的来源，其模型自动出现在 DSH 的模型选择器里 |
+| R2 | DSH「设置」菜单里有 dsh-cpamc 面板，分三部分：① 当前可用的来源和模型、正在用哪个、连接速率、运行状态；② 生成 API Key；③ 其他必要内容 |
+| R3 | 面板只显示来自 CPA 的、**已登录、已完成设置**的内容，只显示有用的部分 |
+| R4 | 面板底部有一张卡片，带说明文字和「全部功能」按钮。点击后打开**原版 CPAMC**，让原版 CPA 为我们服务。我们不改 CPAMC |
+| R5 | 首次安装默认装好六个来源：WorkBuddy、Trae、Qoder、ZCode，加 Claude 订阅和 Codex 订阅。这六个来源都由原版 CPA / CPAMC 提供 |
+| R6 | 每个来源都有「显示 / 隐藏」按钮。默认只向 DSH 显示一两个好用的免费模型，够处理简单任务即可 |
+| R7 | 页面顶部：产品名 dsh-cpamc（不可点）、当前版本号（不可点）、「更新」（检测到新版本才出现）、「卸载」（从 DSH 卸载本插件）。**没有**语言选择，语言跟随 DSH |
+| R8 | 一开始就要求全平台可用（macOS、Windows、Linux）。界面支持多种语言，跟随 DSH |
+| R9 | VPS 上安装时，要处理好域名、本机 IP、公网 IP 之间的冲突 |
+| R10 | VPS 账号管理整合 [dsh-vps](https://github.com/AIcivilization/dsh-vps) |
+| R11 | 卸载必须停掉相应的服务。卸载后不能有服务还在后台运行，也不能有端口被占着 |
+| R12 | 本仓库现有内容可以全部推倒重做，按需更新 GitHub 上的 [dsh-cpamc](https://github.com/AIcivilization/dsh-cpamc) |
 
-## 2. 非目标
+## 2. 架构
 
-- **不做**把 CPA 功能重写成 DSH 原生界面的那套。界面就是 CPAMC 官方前端，一个不少。
-- **不做**模型的接入侧（key 管理、来源开关、模型别名）。那是别的插件的事。
-- **不追求**比手动装 CPA 更"高级"。目标只是**更省事**。
+```text
+DSH 设置 → dsh-cpamc 面板 ──/api-dsh-cpamc/*（在 DSH 自己的鉴权之后）──┐
+                                                                  ▼
+                                         dsh-cpamc 守护进程（沿用 dsh-model daemon）
+                                          ├─ 管理 API（带管理密钥）→ CPA
+                                          ├─ 用量轮询与统计（stats）
+                                          └─ 同步 DSH provider 和凭据引用
+「全部功能」──→ 原版 CPAMC（CPA 自带 /management.html）──管理 API──┐
+                                                                  ▼
+DSH 模型选择器 ──Bearer dsh key──→ CPA 127.0.0.1:<端口>/v1（唯一入口）
+                                   ├─ 渠道插件：workbuddy / trae / qoder / zcode
+                                   └─ 原生 OAuth：claude / codex
+```
 
-## 3. 已定的决策
+- 只有一份 CPA 配置、一个 CPA 进程。面板和 CPAMC 管的是**同一个实例**。
+- CPA、守护进程、CPAMC 都只监听 `127.0.0.1`。浏览器拿不到管理密钥（面板经宿主端转发；CPAMC 的密钥处理见 §7.3）。
 
-| # | 决策 | 说明 |
+## 3. 相对 dsh-model 的增量
+
+### 3.1 原样沿用
+
+| 能力 | dsh-model 中的位置 |
+|---|---|
+| 引擎锁版本、sha256 校验、原子安装、升级回滚 | `engine-manifest.json`、`src/engine/install.ts` |
+| 系统服务托管：launchd、systemd user / system、Windows | `src/service/*` |
+| DSH 接线：`profiles/<p>/cordis.patch.yml` 合并、`.credentials.yaml` 引用、逐字节还原 | `src/dsh/*` |
+| 用量统计：按 key、来源、模型统计成功率、延迟、tokens/s | `src/daemon/stats.ts`、`usage.ts` |
+| 页面一键安装、更新、卸载，VPS 上的 root 提权单元 | `src/commands/self.ts`、`src/service/admin.ts` |
+| VPS 对外地址：Caddy :9443，域名或 `<ip>.sslip.io` | `src/remote/public.ts` |
+| 中英文案、`--json` 命令行 | `src/i18n.ts`、`src/cli.ts` |
+
+### 3.2 修改
+
+| 项 | dsh-model 现状 | dsh-cpamc |
 |---|---|---|
-| D1 | 界面来源 = **嵌入 CPAMC 官方前端** | 功能完整度是这条路的核心价值 |
-| D2 | 附着模式 = **可写** | 附着后能改配置，不只是只读观察 |
-| D3 | 引擎 = **首次运行自动下载** | 用户不需要自己装 CPA |
-| D4 | 端口 = **占用自动切换 + 持久化** | 见 §4.7 |
-| D5 | 界面形态 = **DSH 全屏浮层**（`shell.overlay`） | |
-| D6 | 与 dsh-model 无关 | 独立产品，各跑各的实例 |
+| 来源集合 | 12 个（Kimi、Grok、OpenCode、Ollama 等） | 固定六个（§4）。其他来源不在面板管理，见 §14 Q2 |
+| WorkBuddy | 自研 bridge，读取并解密 App 凭据 | 改用 CPA 渠道插件，在 CPAMC 里走 OAuth 登录。**bridge 删除** |
+| 登录 | 面板内登录（device code、粘贴回调地址） | 默认在 CPAMC 里完成。面板只显示状态，并给出「去全部功能登录」 |
+| 引擎配置 | `engine.yaml` 每次 setup 整份重新生成 | CPAMC 也会写这份配置，所以改为**局部维护**（§6） |
+| 控制台 | `disable-control-panel: true` | 打开，并锁定管理页版本（§7） |
+| 默认模型 | 每个来源推荐 5 个 | 全局只推荐 1–2 个免费模型（§4.2） |
+| 页眉 | 「关于」区块里放版本、更新、卸载 | 移到页面顶部（§5.0） |
+| 语言 | 客户端读 `document.lang`，只分中文和英文 | 跟随 DSH locale。文案走资源文件，可扩展更多语言 |
 
----
+### 3.3 新增
 
-## 4. 架构
+- 渠道插件包：按平台下载、校验、放进 `plugins/`，在配置里逐个 `enabled: true`。
+- 同名模型别名表：同一个模型由多个渠道提供时，拆成 `渠道/模型`，避免 CPA 在渠道之间轮询、消耗别家账号的额度。
+- 「全部功能」卡片和 CPAMC 访问路径（本机和 VPS 各一条）。
+- 渠道的余额和积分（来自渠道插件的管理接口），作为来源行的辅助信息显示。
 
-### 4.1 总体
+### 3.4 删除
 
-插件是标准的 DSH 双半边结构（照 dsh-model / dsh-cpa-monitor 的写法）：
+WorkBuddy bridge 及其系统服务、OpenCode Zen 集成、本机模型（Ollama、LM Studio）、面板内的登录流程。是否保留其余 CPA 原生来源，见 §14 Q2。
 
-| 半边 | 文件 | 运行环境 | 职责 |
+## 4. 六个来源
+
+### 4.1 来源矩阵
+
+| 来源 | CPA 中的提供方式 | 在 CPAMC 里登录 | 平台 |
 |---|---|---|---|
-| 宿主端 | `lib/index.js` | Cordis（`dsh web` / 桌面版主进程） | 下载引擎、管进程、挑端口、伺服面板、反代管理 API、注册配置面 |
-| 客户端 | `lib/client.js` | 浏览器（DSH 外壳） | 注册 `shell.overlay` 全屏浮层 + 设置项 |
+| WorkBuddy | 渠道插件 `workbuddy` | 插件 OAuth（`/v8/management/oauth/auth-url?provider=workbuddy`） | 跟随渠道插件包 |
+| Trae | 渠道插件 `trae` | 插件 OAuth | 同上 |
+| Qoder | 渠道插件 `qoder` | 插件 OAuth | 同上 |
+| ZCode | 渠道插件 `zcode` | 插件 OAuth | 同上 |
+| Claude 订阅 | CPA 原生 | OAuth 回调式，端口 54545，可粘贴回调地址 | 跟随 CPA |
+| Codex 订阅 | CPA 原生 | OAuth 回调式，端口 1455，或 device code | 跟随 CPA |
 
-数据流：
+- 渠道插件包里还带着其他渠道（例如 mimo）。只启用上面四个，其余不写入启用清单。
+- 四个渠道的接口各不相同：ZCode 的余额单位是 token，其他是积分；ZCode 的模型列表路径是 `/plugins/zcode/models`，其他是 `/models/groups`。差异集中登记在一张渠道表里，面板、别名表、启用清单都从这张表派生。
+- 合规：渠道和订阅的凭据在官方客户端之外使用，可能不符合服务商条款。沿用 dsh-model 的做法：首次开启前提示风险，并记录确认时间。Claude 有封禁第三方使用的先例，开启前需要单独确认。
 
-```
-DSH 外壳
-  └ shell.overlay 全屏浮层
-       └ iframe → 面板服务（loopback 独立端口）
-            ├ /            → CPAMC 官方前端（注入 bootstrap）
-            └ /v8/management/* → 反代到目标 CPA 实例（服务端注入密钥）
-```
+### 4.2 显示规则（R6）
 
-### 4.2 CPAMC 前端从哪来
+两层开关，都只影响 **DSH 模型选择器**，不改 CPA 和 CPAMC 里的任何东西。
 
-**从 CPAMC 官方 release 下载，不由引擎提供。**
+1. **来源开关**（每行一个）：隐藏后，该来源的所有模型都不进 DSH。
+2. **模型勾选**（展开来源后）：决定已显示的来源里，哪些模型进入 DSH。
 
-- 源：`router-for-me/Cli-Proxy-API-Management-Center` 的 release，asset 是单个
-  `management.html`（约 3.1 MB）
-- 锁版本 + 硬编码 sha256；缓存在 `~/.dsh-cpamc/panel/<version>/management.html`
-- 多源 fallback（官方 GitHub → 镜像），失败可手动放文件
+默认状态：
 
-**为什么不用引擎自带的那份？**
+- 首次安装时，六个来源的开关都是「显示」，但模型勾选只包含**推荐清单**里、并且实际可用的 1–2 个模型。
+- 推荐清单 `recommend.json` 随插件版本发布：列出模型 id、来源，以及核实免费的日期。只推荐费用档为「免费」并且实测调通的模型。一个都没调通时，显示空状态和原因，不拿别的模型凑数。
+- 来源目录里**新出现的模型默认不勾选**。勾选过的模型下线后自动去掉。
+- 用户的选择存在 `config.json` 的 `visibility` 里，插件升级后保留。
 
-引擎二进制里确实内嵌了 CPAMC（实测：把 `management.disable-control-panel` 设成 `false`，
-`/management.html` 立刻返回 3,290,277 B 的完整界面）。但：
+## 5. 设置面板
 
-1. **附着场景用不了。** 附着到别人的实例时，我们改不了它的配置，
-   它的 `disable-control-panel` 大概率还是 `true`，`/management.html` 是 404。
-2. **安全姿态更好。** 引擎端口上永远不暴露任何网页，界面只在插件自己的面板服务上。
-3. **一条代码路径。** 自建和附着共用同一套前端，不用分支。
+入口：**DSH 设置 → dsh-cpamc**。注册方式沿用 dsh-model 的 `plugin/cordis.patch.yml` + `settings.section`。
 
-代价是多一个 3.1 MB 的下载。相对引擎本体（约 63 MB）可以忽略。
+### 5.0 页眉（R7）
 
-### 4.3 界面怎么伺服 —— 两个候选
+| 元素 | 行为 |
+|---|---|
+| `dsh-cpamc` | 产品名，纯文本 |
+| `v0.x.y` | 当前插件版本，纯文本。引擎和渠道插件的版本放在 §5.3 |
+| 更新 | 守护进程定期查询 npm 最新版本，只有比当前新**且兼容当前平台**时才显示。点击后执行沿用的 `update` 流程。引擎或渠道插件单独有新版时，**不**触发这个按钮 |
+| 卸载 | 弹出确认，选择是否保留登录数据，然后执行 §10.3 的卸载顺序 |
 
-这是本设计里**最需要拍板的一处**，因为两条路的隔离性差一个量级。
+### 5.1 来源与模型（R2 ①、R3）
 
-#### 候选 A：挂在 DSH 自己的 webServer 上（同源）
+六行固定来源，每行显示：
 
-宿主端在 DSH 的 webServer 上注册 `/dsh-cpamc/*`，iframe 指向同源路径。
+- 来源名、状态（未登录 / 检查中 / 可用 / 需要重新登录 / 额度用完 / 异常），以及显示 / 隐藏开关；
+- 已勾选进 DSH 的模型。展开后可以改勾选。**只有已登录且探测通过的来源可以展开**；
+- 余额或积分（渠道插件提供时才显示）；
+- 该来源最近 1 小时和 24 小时的成功率、平均延迟、tokens/s，数据来自沿用的 stats，标出样本数。没有请求时显示「暂无数据」；
+- 未登录的来源只显示一个按钮「在全部功能中登录」，不展开，也不进 DSH。
 
-- ✅ 实现最简单，不用额外端口
-- ✅ 天然过 DSH 的登录校验
-- ❌ **隔离不了。** 同源意味着 DSH 页面里**任何能执行 JS 的东西**都能调用
-  `/dsh-cpamc/v8/management/*`，浏览器会自动带上我们注入的密钥。
-  DSH 的插件机制本身就允许插件往页面注入 JS——所以一个第三方插件可以静默拿到
-  CPA 的完全控制权（改配置、读全部凭据、看所有 API key）。
-- ❌ 加 httpOnly cookie 也没用：**能挡住读 cookie，挡不住发请求**（浏览器会自动带）。
-- ❌ 加页面令牌也没用：同源脚本读得到 DOM 和 JS 变量。
+页面上方显示一行「正在用」：DSH 没有接口提供当前会话选中的模型，所以显示**最近一次成功请求用到的模型**，并且明确标注为「最近使用」。
 
-#### 候选 B：插件自己起一个 loopback 面板服务（跨源）**（推荐）**
+### 5.2 API Key（R2 ②）
 
-宿主端在 `127.0.0.1` 的一个独立端口上 `http.createServer()`，iframe 指向它。
-不需要新进程，只是宿主端多 listen 一个端口。
+沿用 dsh-model 的 `keys.json`，以及新增、复制、轮换、吊销操作和逐 key 统计。新增规则：
 
-- ✅ **真正的跨源隔离。** DSH 页面里的其他插件读不到那个 origin 的 storage，
-  也读不到跨源 iframe 的 `location`。
-- ✅ **没有 CORS 问题** —— 前端和反代在同一个 origin（面板服务自己）。
-- ✅ **没有 X-Frame-Options 问题** —— 前端是我们自己伺服的文件，不加限制头。
-- ✅ 密钥不进浏览器（服务端反代时注入）。
-- ⚠️ 多一个端口要管；多一层要保证只绑 `127.0.0.1`。
-- ⚠️ **依赖 DSH 外壳的 CSP 允许跨源 iframe** —— 见 §8，必须先实测。
+- 新 key 的完整内容只显示一次，之后列表只显示名称、创建时间、最近使用时间和后 4 位。
+- `dsh` 这把 key 自动接入 DSH，不能吊销，只能轮换。
+- 用户可能在 CPAMC 里直接改 `api-keys`，对账规则见 §6。
+- 地址分两种显示：**本机地址** `http://127.0.0.1:<端口>/v1`，标注「仅本机」；**外部地址**，只在 VPS 上已经配好对外路由时显示。
 
-**倾向 B。** 代价是一个 loopback 端口，换到的是"其他插件碰不到这个界面和密钥"。
-候选 A 的风险无法在插件层面消除，只能靠"用户信任自己装的每个插件"这个前提兜着。
+### 5.3 服务与其他（R2 ③）
 
-### 4.4 密钥怎么给
+- CPA 状态：运行中 / 启动中 / 已停止 / 启动失败（附原因）。端口、CPA 版本、渠道插件版本。
+- 操作：「重新检查」「重启服务」「修复」（沿用 `repair`）。
+- VPS 上额外显示：部署位置、外部地址、证书状态，并链接到 dsh-vps 的账号管理页（R10）。
+- 不显示 YAML、管理密钥、完整日志。
 
-**不进浏览器。** 面板服务在反代 `/v8/management/*` 时，于服务端加上
-`Authorization: Bearer <managementKey>`，覆盖前端传来的任何值。
+### 5.4 「全部功能」卡片（R4）
 
-前端仍然需要一个**非空**的占位 `managementKey`——因为 CPAMC 的 `checkAuth` 是
-`if (!managementKey || !apiBase) return false`，空值会跳登录页。所以注入一个固定占位串
-（如 `dsh-cpamc-managed`），真实密钥由服务端兜住。
+文案：「需要登录账号、修改完整配置、调整路由或查看详细日志？打开原版管理界面。」按钮：**全部功能**。
 
-### 4.5 自动登录
+点击后：确认 CPA 在运行（不在就先启动）→ 打开 CPAMC（本机和 VPS 的地址见 §7）→ 用系统默认浏览器打开。DSH 内嵌窗口留到验证后再考虑，OAuth 跳转在系统浏览器里最可靠。
 
-CPAMC 是 zustand persist 到 localStorage 的，键为 `apiBase` / `managementKey` /
-`isLoggedIn`，值默认做了混淆，但它有 `migratePlaintextKeys()` 会自动迁移明文——
-所以**注入明文即可**。
+## 6. 配置归属：面板和 CPAMC 共写一份配置
 
-启动逻辑（反编译产物确认）：若 `isLoggedIn === 'true'` 且 `apiBase` 与 `managementKey`
-非空，则直接走自动登录，不显示登录页。
-
-注入方式：伺服 `management.html` 时在 `<head>` 最前面插一段 `<script>`，写入上述三个键。
-
-**两个必须遵守的约束**（都从 CPAMC 源码里挖出来的）：
-
-1. **`apiBase` 必须是绝对 URL，带 `http://` 或 `https://` 前缀。**
-   它的规范化函数是：
-   ```js
-   tp = e => { ...; /^https?:\/\//i.test(t) || (t = `http://${t}`); return t }
-   ```
-   传相对路径 `/dsh-cpamc` 会被拼成畸形的 `http:///dsh-cpamc`。
-2. **不能依赖它的自动推导。**
-   ```js
-   rp = () => { const {protocol, hostname, port} = location; return tp(`${protocol}//${hostname}${port?':'+port:''}`) }
-   ```
-   它只取 **origin**，把 pathname 整个丢掉。所以在候选 A（挂在 `/dsh-cpamc/` 前缀下）
-   必须显式写死 `apiBase`；在候选 B 下 `rp()` 恰好推导出面板服务的 origin，天然正确，
-   但仍建议显式注入以免依赖内部行为。
-
-**路由前缀不是问题**：CPAMC 用的是 **HashRouter**（`BrowserRouter` / `createBrowserHistory`
-在产物里出现次数为 0，被 tree-shake 掉了），SPA 路由跑在 `#/dashboard` 这类 hash 里，
-永远不会请求到服务端路径。所以挂在任意前缀下都安全。
-
-### 4.6 引擎的获取与安装
-
-- 源：`router-for-me/CLIProxyAPI` 的 release
-- **锁版本**，不要用 latest：CPAMC 的界面与 CPA 的 v8 管理 API 是配套的，
-  而且 CPA 的配置格式在 v7→v8 变过一次。用 latest 会让插件在用户机器上突然崩。
-- 每平台硬编码 asset 名与 sha256。上游 v8.0.13 的资产长这样：
-
-  ```
-  CLIProxyAPI_<ver>_darwin_aarch64.tar.gz
-  CLIProxyAPI_<ver>_darwin_amd64.tar.gz
-  CLIProxyAPI_<ver>_linux_aarch64.tar.gz
-  CLIProxyAPI_<ver>_linux_amd64.tar.gz
-  CLIProxyAPI_<ver>_windows_aarch64.zip      ← Windows 是 .zip
-  CLIProxyAPI_<ver>_windows_amd64.zip
-  CLIProxyAPI_<ver>_*_no-plugin.tar.gz
-  checksums.txt
-  ```
-
-- 安装到 `~/.dsh-cpamc/engine/versions/<ver>/`，`current` 软链指过去
-- 校验：sha256 **硬编码在插件里**，不从网络取
-- 下载完 **`chmod 0o755`**
-
-#### 平台映射（这块必须写对）
-
-| `process.platform` | `process.arch` | 上游 asset 段 | 归档 |
-|---|---|---|---|
-| `darwin` | `arm64` | `darwin_aarch64` | `.tar.gz` |
-| `darwin` | `x64` | `darwin_amd64` | `.tar.gz` |
-| `linux` | `arm64` | `linux_aarch64` | `.tar.gz` |
-| `linux` | `x64` | `linux_amd64` | `.tar.gz` |
-| `win32` | `x64` | `windows_amd64` | **`.zip`** |
-| `win32` | `arm64` | `windows_aarch64` | **`.zip`** |
-
-两个坑：
-
-1. Node 返回 **`win32`**，上游用 **`windows`** —— 必须映射，不能直接拼。
-2. Windows 是 **`.zip`**，其他平台是 `.tar.gz` —— 解压路径要分开。
-
-#### 平台守卫（必须做）
-
-**在下载之前**就判断平台是否支持，不支持则明确报错退出。
-
-这条是从一次真实事故来的：`dsh-cpa-switch@0.12.0` 把资源名硬编码成
-`CLIProxyAPI_*_windows_amd64.zip`，在 macOS 上照下不误，然后 `spawn` 那个
-Windows PE 文件 → `EACCES` → **fatal uncaught exception 把整个 DSH 拖崩**，
-用户连界面都进不去。它没有平台守卫，代价是宿主进程挂掉。
-
-引擎二进制名在 Windows 上还要带 `.exe` 后缀。
-
-### 4.7 端口
-
-**默认 8317**（CPA 的惯例端口）。
+这是在 dsh-model 基础上改动最大的地方。CPAMC 通过管理 API 直接改 CPA 的配置。如果 dsh-cpamc 继续整份重新生成配置，用户在 CPAMC 里的修改会被覆盖。
 
 规则：
 
-```
-首次启动 → 从默认端口开始往上找
-         → 每个候选端口做一次真正的 bind 测试（net.createServer().listen）
-         → 占用则 +1，最多试 N 个
-         → 选中的端口写进 ~/.dsh-cpamc/config.json 持久化
-后续启动 → 先试记录里的端口
-         → 还在 → 直接用，什么都不变
-         → 被占 → 重新找，并在界面上明确提示"端点已变更"
-```
+1. **首次安装**时生成完整配置。之后**以 CPA 实际配置为准**，不再整份重写。
+2. dsh-cpamc 只拥有以下几项，修改时**按键局部修改**（优先走管理 API，CPA 停机时才直接改文件，并保留原缩进）：
+   - `server.host`（必须是 `127.0.0.1`）；
+   - `access.api-keys` 中由 `keys.json` 管理的那些 key；
+   - `management.secret-key`；
+   - `plugins.configs.<四个渠道>.enabled`；
+   - 别名表中 dsh-cpamc 生成的条目。
+3. 其余字段（路由策略、代理、额外的 provider、日志等）归用户和 CPAMC 所有，dsh-cpamc 只读。
+4. **key 对账**：`keys.json` 里有但 CPA 里没有的 key，视为在 CPAMC 里被删除，标记为已吊销。CPA 里有但 `keys.json` 里没有的 key，列为「在全部功能中添加」（无名称，只显示后 4 位，不能在面板里吊销）。
+5. `修复` 只补齐 dsh-cpamc 拥有的字段，不还原用户的修改。
 
-两个要点：
+## 7. 原版 CPAMC 的接入
 
-1. **探测必须真 bind，不能只 connect。** 有些程序占着端口但不接受连接，
-   只看 connect 会误判成空闲，然后在启动引擎时才发现起不来。
-2. **端口必须持久化。** 这个实例的 `/v1` 端点是给用户**外部客户端**用的
-   （Cursor、Claude Code、自己的脚本）。端口每次重启都变会让用户配好的东西全废，
-   而且报错信息很难懂。
+### 7.1 启用与版本锁定
 
-另外允许用户**手动指定**端口——有人要固定端口做转发或防火墙规则，自动挑反而是麻烦。
+- 配置里设置 `disable-control-panel: false`，由 CPA 在 `/management.html` 上提供 CPAMC。
+- CPA 会自动从网上拉取和更新管理页（**需要验证**具体机制和配置项）。如果能关掉自动更新，就关掉，并在 `engine-manifest.json` 里锁定管理页的版本和 sha256，由 dsh-cpamc 放到对应位置。如果关不掉，记录为已知偏差，并核对它不会和锁定的 CPA 管理 API 版本冲突。
+- 管理页、CPA 版本、渠道插件版本三者一起写在 manifest 的兼容组合里，一起升级。
 
-### 4.8 实例发现与附着
+### 7.2 本机
 
-用户选 `attached` 模式时，插件去找一个已有的 CPA 实例。
+本机直接打开 `http://127.0.0.1:<端口>/management.html`。`allow-remote: false` 保持不变。
 
-**发现方式**（按可靠性排序）：
+### 7.3 管理密钥
 
-1. **引擎自带的发现能力。** 实测 `--help` 里有：
-   ```
-   -discover         Discover local AI gateways and CPA instances on the LAN
-   -discover-json    Output discovered gateways in JSON format
-   -discover-service-type string   DNS-SD service type (default _ai-gateway._tcp)
-   ```
-   官方就有发现机制，比猜端口靠谱。**是否默认广播、能否扫到本机实例需要实测**（见 §8）。
-2. **用户手动填。** 端口 + 管理密钥。最可靠，任何时候都能用。
-3. **读已知位置的文件。** 例如 `~/.dsh-model/mgmt.json` 里有明文的 `dshg_...`。
-   能做，但这是**跨产品私有文件耦合**，对方改个格式就崩。
-   如果做，必须**明确告诉用户"我要去读 XX 文件了"**，不能静默。
+原版 CPAMC 登录时要用户输入管理密钥，这一点不能改 CPAMC 去绕开。方案：
 
-**附着的硬约束**：管理 API 需要密钥，而引擎配置里的 `secret-key` 可能是
-**bcrypt 哈希**（dsh-model 就是这么写的：`mgmt.json` 存明文，`engine.yaml` 存它的哈希）。
-**哈希不可逆，读不出原值。** 所以密钥只能来自：用户手动提供，或者某个恰好存了明文的地方。
+- 「全部功能」卡片里提供「复制登录密钥」：只复制到剪贴板，界面不显示明文，30 秒后清空剪贴板（在平台支持时）。
+- 不把密钥放进 URL、查询参数、日志或 DSH 配置。
+- 卡片上有「重置登录密钥」：生成新的管理密钥并让 CPA 重载。守护进程同步更新自己持有的那份。
 
-**附着的前提**：目标实例必须是 **CPA ≥ 8.0.0**（CPAMC 的硬要求）。
-探测到低版本要明确拒绝，而不是连上去显示一堆空白。
+这意味着管理密钥会到达用户手里，这是使用原版 CPAMC 的前提。面板本身仍然不接触管理密钥。
 
-#### 附着是可写的 —— 必须警告
+### 7.4 VPS
 
-D2 定的是可写。这意味着：
+经反向代理过来的请求，在 CPA 看来来自本机，`allow-remote: false` 起不到保护作用，所以 CPAMC 必须放在登录门后面。dsh-vps 已有现成的登录门，直接复用：
 
-> 如果那个实例正被别的程序管理（比如 dsh-model 用 launchd 托管、配置由它生成），
-> 用户在 CPAMC 里改的东西**可能被那个程序覆盖回去**。
+- **现状**（dsh-vps `gate/server.js`）：Caddy 把 DSH 站点的全部请求转给 dsh-gate（127.0.0.1:3100）。gate 负责登录（scrypt 口令、HMAC 会话 Cookie、登录限流、`X-Forwarded-For` 由 Caddy 覆盖防伪造），对未登录的请求一律拒绝或跳转登录，然后透明代理到 DSH（3080）。gate 已经按路径分流过自己的页面（`/login`、`/gate/*`、`/setup`），也对插件市场路径做了同源校验。
+- **做法**：在 gate 里给 CPAMC 加一个路径前缀（例如 `/cpamc/`），**先过 gate 登录**，再去掉前缀转发到 `127.0.0.1:<CPA 端口>`。CPAMC 打开地址就是 `https://<dsh 的域名或 IP>/cpamc/management.html`，和 DSH 同源，复用同一个登录态。Caddy 和证书都不用改，也不用新开端口。
+- 写请求沿用 gate 对插件市场的同源校验，防跨站请求。
+- 前缀和上游端口由 dsh-cpamc 通过一个**小接口**登记给 gate（例如 gate 读取 `state/routes.d/dsh-cpamc.json`，dsh-cpamc 卸载时删除该文件）。gate 只接受指向 `127.0.0.1` 的上游，不接受任意地址。这是 dsh-vps 侧的一处小改动（§12 V6）。
+- 不走 DSH 插件宿主路由：DSH 插件路由只支持 GET、HEAD、POST，而 CPAMC 的管理接口要用 PUT、PATCH、DELETE。
+- 对外的 `:9443` 站点（dsh-model 现有）只转发 `/v1/*`，只认模型 API key，不暴露任何管理路径。
 
-插件**必须在附着模式的界面上显著提示这一点**，并显示"当前在管哪个实例"
-（端口号 + 配置目录路径）。这不是锦上添花——用户很容易在错误的实例上配半天。
+## 8. 平台矩阵（R8）
 
-附着模式下插件**不碰目标实例的进程**，只连它的管理 API。
+| 平台 | CPA | 渠道插件包 | 服务托管 | 状态 |
+|---|---|---|---|---|
+| macOS arm64 | ✓ | ✓ `.dylib` | launchd（沿用） | 目标 |
+| macOS x64 | ✓ | ✓ | launchd | 目标 |
+| Linux x64 | ✓ | ✓ `.so` | systemd user / system | 目标 |
+| Linux arm64 | ✓ | ✓ | systemd | 目标 |
+| Windows x64 | ✓ | ✓ `.dll` | Windows（dsh-model 0.18 beta） | 目标，需完成 beta 收尾 |
+| Windows arm64 | ✓ | **✗ 没有发布** | Windows | **缺口**：用 x64 版本的 CPA 加渠道插件，在系统的 x64 仿真下运行，或者等渠道插件补发 arm64 版本 |
 
-### 4.9 生命周期
+- 所有下载项（CPA、渠道插件包、管理页）都写进同一份 `engine-manifest.json`，带 URL 和 sha256，不在运行时查询「latest」。
+- 渠道插件和 CPA 的兼容性要成对验证（§12 V1）。渠道插件**不自动升级**，跟随插件版本一起升级。
 
-| 模式 | 引擎进程 |
-|---|---|
-| `managed`（自建） | 插件负责：启动 / 停止 / 开机自启（macOS `launchd`、Linux `systemd --user`、Windows 计划任务） |
-| `attached`（附着） | **不碰**。目标实例由它自己的管理者负责 |
+## 9. VPS 与地址（R9、R10）
 
-`managed` 模式下，插件生成的 `config.yaml` 里：
-- `management.secret-key`：用**明文**（便于自己反代时使用；不要用 bcrypt）
-- `management.disable-control-panel: true`（界面由我们自己伺服，引擎端口不暴露网页）
-- `management.allow-remote: false`
-- `server.host: 127.0.0.1`
+沿用 dsh-model 的 VPS 模式（`/opt/dsh-vps` 检测、`User=dsh` 的 systemd 单元、root 提权单元），并明确三种地址：
 
----
-
-## 5. 配置
-
-按 DSH 的三层覆盖：**schema 默认 → 组合层（`cordis.patch.yml`）→ 用户层**。
-
-用户层落点随 DSH 版本变化（≤0.1 是 `$DSH_HOME/settings.yaml`，≥0.2 是当前 profile 的配置文档）。
-DSH 0.2 的配置表单只保留标了 `meta.volatile` 的字段，标记方式用
-`.extra("volatile", true)` 而不是 `.volatile()`（后者只存在于宿主打过补丁的
-schemastery 3.18.4 里，公开发布的 3.18.2 没有这个方法）。
-
-字段草案：
-
-| 字段 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `mode` | `managed` \| `attached` | `managed` | |
-| `port` | number | `8317` | 自建实例端口，`0` = 自动挑 |
-| `attach.baseURL` | string | — | 附着目标，如 `http://127.0.0.1:8317` |
-| `attach.managementKey` | secret | — | 附着目标的管理密钥 |
-| `engineVersion` | string | 锁定值 | |
-| `panelVersion` | string | 锁定值 | CPAMC 前端版本 |
-| `proxy` | string | — | 下载与上游请求用的代理 |
-| `autoStart` | boolean | `true` | 开机自启（仅 managed） |
-| `openIn` | `overlay` \| `browser` | `overlay` | 在哪打开界面 |
-
----
-
-## 6. 平台适配
-
-目标是 macOS / Linux / Windows 全平台，但工作量差异很大：
-
-| 平台 | 引擎 | 服务托管 | 工作量 |
-|---|---|---|---|
-| macOS | ✅ 上游有包 | `launchd` | 小 |
-| Linux | ✅ 上游有包 | `systemd --user` | 小 |
-| Windows | ✅ 上游有包（`.zip`） | **没有现成方案** | 大 |
-
-Windows 是真正的工作量所在：没有 launchd/systemd 那套"写个配置文件 + 调一个命令"的
-简单路径。选项是 `sc.exe`（要管理员权限）、计划任务（行为差异大）、
-或者放弃守护、只做前台启动。
-
-**建议**：先把 macOS / Linux 做扎实，Windows 单独一个里程碑。
-
----
-
-## 7. 安全与风险
-
-| 风险 | 说明 | 处理 |
+| 地址 | 使用方 | 值 |
 |---|---|---|
-| **同源下的插件互扰** | 若走候选 A，DSH 页面里任何能执行 JS 的东西都能调用管理 API | 走候选 B（跨源） |
-| **密钥泄漏到前端** | CPAMC 前端会调管理 API | 服务端反代注入，前端只有占位值 |
-| **本机暴露** | 面板服务与引擎都监听端口 | 一律只绑 `127.0.0.1` |
-| **附着时覆盖别人的配置** | D2 选了可写 | 界面显著警告 + 显示当前实例 |
-| **下载被投毒** | 引擎和前端都从网络下载 | sha256 硬编码在插件里校验 |
-| **不支持的平台拖崩宿主** | 见 §4.6 的真实事故 | 下载前平台守卫 |
-| **配置双写冲突** | 附着到被别的程序管理的实例时 | 明确警告；不静默接管 |
+| 管理地址 | 守护进程、宿主端 | `http://127.0.0.1:<端口>`，永远只走本机 |
+| provider 地址 | 服务器上的 DSH | `http://127.0.0.1:<端口>/v1`。服务器**不通过**自己的公网域名回连自己，避免 NAT 回环、DNS、证书问题 |
+| 外部地址 | 用户其他设备上的客户端 | `https://<dsh 的域名>:9443/v1`；只有 IP 时用 `https://<ip>.sslip.io:9443/v1` |
 
-**一句诚实的话**：DSH 的插件模型本身就要求"用户信任自己装的插件"。
-上面这些措施能缩小攻击面，但**不能**在插件层面彻底解决同源互扰——
-这是选择候选 B 的原因，也是它值得那一个额外端口的原因。
+- 写给 DSH 的 `baseURL` 永远是服务器本机地址，不会把 `127.0.0.1` 发给远程浏览器使用，也不会把公网域名写进服务器端配置。
+- 域名或 IP 由 dsh-vps 提供。现在 dsh-model 直接读 `/etc/caddy/dsh-site.conf`，0.1 先沿用。之后改为调用 dsh-vps 的接口（§12 V6），dsh-cpamc 不保存 SSH 或 VPS 登录凭据。
+- 域名或 IP 变化后，重新生成 `:9443` 站点和外部地址。服务器上 DSH 的 provider 地址不受影响。
 
----
+## 10. 安装、更新、卸载
 
-## 8. 必须先实测的前置条件
+### 10.1 首次安装
 
-这几条不验证就动手，很可能白写：
+用户从 DSH 插件市场安装 dsh-cpamc → 面板显示「一键安装」（沿用 dsh-model 的页面安装流程；VPS 上需要 root，只给出命令）→ 依次执行：
 
-1. **DSH 外壳的 CSP 是否允许 iframe。**
-   同源（候选 A）和跨源 loopback（候选 B）都要测。如果 CSP 卡死 `frame-src`，
-   整个浮层方案就得改（退化成"唤起系统浏览器"）。
-2. **OAuth 流程在 iframe 里能不能走通。**
-   CPAMC 里的 OAuth（Codex / Claude / Kimi / Gemini…）会跳外部授权页再回调到
-   `http://localhost:<port>`。在 iframe 里做这个大概率有问题，可能要 `window.open` 新窗口；
-   而新窗口如果没有 bootstrap 注入，会要求重新登录。
-3. **CPAMC 的 `rp()` 在独立端口下推导是否正确**（候选 B 的关键前提）。
-4. **引擎的 `-discover` 能否发现本机实例**、是否需要实例开启广播。
-5. **`shell.overlay` 的尺寸与滚动行为** —— CPAMC 是为整页设计的（有侧边栏、多级路由），
-   塞进浮层里可能出现嵌套滚动条、弹窗被裁剪。
+平台检查 → 下载 CPA、渠道插件包、管理页并校验 → 原子安装 → 生成配置（§6 第 1 条）→ 生成 `dsh` key 和管理密钥 → 注册服务并启动 → 健康检查 → 写入 DSH provider（模型为空时**不写**）。
 
----
+每一步都可以重复执行，结果一样。所有步骤完成后，六个来源都显示为「未登录」，等用户去「全部功能」里登录。
 
-## 9. 里程碑
+### 10.2 更新
 
-| 阶段 | 内容 | 产出 |
-|---|---|---|
-| **M0** | 实测 §8 的 5 条 | 结论 + 方案定稿（含 A/B 最终选择） |
-| **M1** | 自建实例 + 面板能打开 | 最小可用：装上就能看到 CPAMC |
-| **M2** | 自动登录 + 配置面 + 端口持久化 | 用户不用输密钥、不用管端口 |
-| **M3** | 附着模式（可写）+ 实例标识 | 能接管已有实例 |
-| **M4** | Windows 支持 | 全平台 |
+沿用 dsh-model 的 `update`。插件新版本可能带来新的 manifest（CPA、渠道插件、管理页）：先在临时端口上验证新组合，通过后再切换，失败就回滚到上一个版本。
 
-`0.0.x` 是名字占位，`0.1.0` 从 M1 开始。
+### 10.3 卸载（R11）
 
----
+顺序：
 
-## 附：本设计中已验证的技术事实
+1. 撤掉 VPS 上的 `:9443` 站点（reload Caddy）和 gate 里的 `/cpamc/` 登记；
+2. 从 DSH 撤下 provider 和凭据引用（逐字节还原）；
+3. 停止并注销 CPA 和守护进程的服务，以及 VPS 上的提权单元；
+4. 按 PID、启动时间、可执行文件路径确认**本插件的**进程都已退出。退不掉的按 TERM → 等待 → KILL 处理；
+5. 确认端口已经释放；
+6. 删除 dsh-cpamc 的数据（是否保留登录数据由用户在第 0 步选择）；
+7. 最后通过 DSH 插件管理移除插件本身。
 
-以下都是实测或读源码确认的，不是推测：
+任何一步失败，都显示失败原因和「重试」，不显示「已卸载」。
 
-| 事实 | 来源 |
+**从 DSH 插件管理器直接移除**时，不会经过上面的流程。需要验证 DSH 有没有卸载钩子（§12 V4）。没有的话，守护进程定期检查插件是否还在任一 profile 中；连续多次检查都不在，就执行第 1 到第 6 步，然后自行退出。
+
+## 11. 与 dsh-model 共存
+
+两者都会占用 CPA 的端口，都会往 DSH 写 provider，所以**同一台机器只能装一个**。
+
+- 安装 dsh-cpamc 时如果检测到 dsh-model，提示迁移：Codex 和 Claude 的登录文件格式相同，可以直接复制过来；key 可以连名称一起迁移；然后调用 dsh-model 的卸载。
+- 用户不同意迁移时，停止安装并说明原因，不和 dsh-model 抢端口。
+
+## 12. 实现前逐项验证
+
+每一项都标出参考依据：dsh-model 的现有实现，或参考插件的做法（地址见内部交接说明，不随仓库发布）。
+
+| # | 验证项 | 参考依据 | 不通过时 |
+|---|---|---|---|
+| V1 | 官方 CPA 发布版能否加载渠道插件包（各平台），以及渠道插件和 CPA 的版本兼容性 | 参考插件用的是从上游 tag 重新编译的 CPA（只有 Windows x64），需要确认官方发布版是否可以直接用 | 在 `AIcivilization/CLIProxyAPI` 用上游 tag 编译各平台版本，manifest 指向自己的 release（dsh-model 设计 §8 已预留这条路） |
+| V2 | 四个渠道在 CPAMC 里可见：账号列表、OAuth 登录、模型目录 | 参考插件经 `/v0/management/plugins/<id>/*` 和 `/v8/management/oauth/*` 管理 | 若 CPAMC 不显示渠道插件，R5「由原版 CPAMC 提供」无法满足，需要和你确认 |
+| V3 | CPAMC 管理页的提供方式、自动更新、能否锁版本 | CPA 配置 `disable-control-panel` 等字段 | 记录偏差（§7.1） |
+| V4 | DSH 有没有卸载钩子；插件更新后是否需要重启 DSH | dsh-model：更新后需要重启 DSH | 用 §10.3 的守护进程自检兜底 |
+| V5 | VPS 上 Claude 和 Codex 在 CPAMC 里能否完成 OAuth（粘贴回调地址） | dsh-model §14.2：管理接口 `oauth/callback` | 面板保留 dsh-model 的登录流程，作为 VPS 上的备用 |
+| V6 | gate 加 `/cpamc/` 前缀转发（登记文件 + 先登录后转发 + 同源校验）；CPAMC 在带前缀的路径下能否正常工作（页面资源路径、管理接口基地址） | dsh-vps `gate/server.js` 已有登录门和按路径分流；dsh-model 已读 `dsh-site.conf` 取域名 | CPAMC 不认前缀时，改用 gate 的独立子路径，或在登录页里手动填写带前缀的地址 |
+| V7 | Windows arm64：x64 仿真下 CPA 加渠道插件能否运行 | — | 0.1 在该平台标记为不支持，并在下载前提示 |
+| V8 | 同名模型跨渠道轮询的别名表写法 | 参考插件 `model-alias` | — |
+| V9 | 推荐清单里的模型实测：免费、能调通 | dsh-model `pricing` 字段（2026-10 核实） | 推荐清单为空，面板显示空状态 |
+
+## 13. 里程碑
+
+| 版本 | 内容 |
 |---|---|
-| 引擎二进制内嵌 CPAMC，`disable-control-panel: false` 时 `/management.html` 返回 3,290,277 B | 临时实例实测 |
-| CPAMC 用 HashRouter，挂在任意前缀下安全 | 反编译产物 |
-| `apiBase` 非绝对 URL 会被强行补 `http://` | 反编译产物 `tp()` |
-| 自动推导只取 origin、丢弃 pathname | 反编译产物 `rp()` |
-| 自动登录条件是 `isLoggedIn` + `apiBase` + `managementKey` 三者非空 | 反编译产物 |
-| 明文注入会被 `migratePlaintextKeys()` 自动迁移 | 反编译产物 |
-| CPAMC 要求 CPA ≥ 8.0.0，只用 v8 Management API | CPAMC README |
-| 上游发布资产命名（含 Windows 是 `.zip`） | GitHub release API |
-| 引擎自带 `-discover` / DNS-SD `_ai-gateway._tcp` | `cli-proxy-api --help` |
-| DSH 插件为 Cordis 双半边，宿主端可挂路由到 dsh webServer | dsh-model / dsh-cpa-monitor 源码 |
-| 已知槽位：`settings.section`、`shell.overlay`、`sidebar.footer.action` | 现有插件源码 |
-| 无平台守卫会导致宿主进程崩溃 | dsh-cpa-switch 在 macOS 上的真实崩溃日志 |
+| 0.1 | 从 dsh-model 分出代码，去掉 bridge 和多余来源；接入渠道插件包；完成 §6 的配置归属；面板三部分加页眉；「全部功能」（本机）。平台：macOS、Linux |
+| 0.2 | Windows x64；dsh-model 迁移；卸载自检兜底 |
+| 0.3 | VPS：CPAMC 挂在 dsh-vps 的 gate 登录门后面（含 dsh-vps 侧小改动），外部地址；Windows arm64 结论 |
+
+全平台是产品目标。上表是交付顺序，不是降低范围：每个平台都要有实测记录才算支持。
+
+## 14. 待决问题
+
+| # | 问题 | 建议 |
+|---|---|---|
+| Q1 | 面板内要不要保留「登录」按钮，作为 CPAMC 之外的快捷入口？ | 0.1 不保留，只做「在全部功能中登录」。V5 不通过时，VPS 上再加回来 |
+| Q2 | 用户在 CPAMC 里加了六个以外的来源（例如 Gemini），它的模型进不进 DSH？ | 面板底部增加一个折叠的「其他来源」分组，默认隐藏，可以手动显示 |
+| Q3 | 余额、签到这类渠道功能要不要在面板里做？ | 只读显示余额；签到等操作留在 CPAMC |
