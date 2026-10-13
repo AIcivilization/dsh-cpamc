@@ -12,6 +12,8 @@ import { L } from '../i18n.js'
 import { redactProxy } from './proxy.js'
 
 const TIMEOUT_MS = 10 * 60 * 1000
+/** 这么久一个字节都没收到就当卡住了（换下一个下载源） */
+const STALL_MS = 30_000
 const UA = 'dsh-cpamc'
 
 interface Got {
@@ -98,10 +100,14 @@ let currentWhat = ''
 function collect(r: import('node:http').IncomingMessage, resolve: (g: Got) => void, reject: (e: Error) => void): void {
   const chunks: Buffer[] = []
   const tick = progress(r)
+  let stall = setTimeout(() => r.destroy(new Error('stalled: no data for 30s')), STALL_MS)
   r.on('data', (c: Buffer) => {
     chunks.push(c)
     tick?.(c.length)
+    clearTimeout(stall)
+    stall = setTimeout(() => r.destroy(new Error('stalled: no data for 30s')), STALL_MS)
   })
+  r.once('close', () => clearTimeout(stall))
   r.once('error', reject)
   r.once('end', () => resolve({ status: r.statusCode ?? 0, ...(r.headers.location ? { location: r.headers.location } : {}), body: Buffer.concat(chunks) }))
 }

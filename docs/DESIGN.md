@@ -246,6 +246,8 @@ WorkBuddy bridge 及其系统服务、OpenCode Zen 集成、本机模型（Ollam
 | Windows arm64 | ✓ | **✗ 没有发布** | Windows | **缺口**：用 x64 版本的 CPA 加渠道插件，在系统的 x64 仿真下运行，或者等渠道插件补发 arm64 版本 |
 
 - 所有下载项（CPA、渠道插件包、管理页）都写进同一份 `engine-manifest.json`，带 URL 和 sha256，不在运行时查询「latest」。
+- **下载来源**：在要靠代理才能访问 GitHub 的网络里，经代理下载可能慢到一个多小时（实测几 KB/s）。所以同一批文件也按平台打成 npm 资源包 `dsh-cpamc-assets-<平台>`（附三者各自的 MIT 许可，`third-party/licenses/`），由 GitHub Actions 的 `assets` 工作流下载、校验、发布。setup 依次尝试：国内 npm 镜像（直连）→ npm 官方源（经代理）→ GitHub 原地址（经代理）；不管来自哪里都按 manifest 里的 sha256 校验。setup 自己下载资源包，不交给 npm / pnpm 安装，所以不受 pnpm 的发布时长检查影响。
+- 下载每 10% 或每 10 秒显示一次进度（速度、预计剩余时间）；连接失败自动重试；30 秒没有收到数据就换下一个来源。
 - 渠道插件和 CPA 的兼容性要成对验证（§12 V1）。渠道插件**不自动升级**，跟随插件版本一起升级。
 
 ## 9. VPS 与地址（R9、R10）

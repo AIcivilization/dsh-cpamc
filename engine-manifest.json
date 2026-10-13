@@ -78,5 +78,20 @@
     "file": "management.html",
     "url": "https://github.com/router-for-me/Cli-Proxy-API-Management-Center/releases/download/v1.26.2/management.html",
     "sha256": "808cfd05ce5766a0f3854f8e095e5c5ea6e4313399f2df0d52b7a40352be29df"
+  },
+  "npm": {
+    "package": "dsh-cpamc-assets",
+    "version": "1.0.0",
+    "registries": [
+      "https://registry.npmmirror.com",
+      "https://registry.npmjs.org"
+    ],
+    "targets": {
+      "darwin-aarch64": "darwin-arm64",
+      "darwin-amd64": "darwin-x64",
+      "linux-amd64": "linux-x64",
+      "linux-aarch64": "linux-arm64",
+      "windows-amd64": "win32-x64"
+    }
   }
 }

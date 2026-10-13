@@ -12,7 +12,8 @@ import { L } from '../i18n.js'
 import { run } from '../util/exec.js'
 import { ensureDir, exists, sha256 } from '../util/fs.js'
 import { PKG_ROOT } from '../util/pkg.js'
-import { download, downloadText } from '../util/download.js'
+import { downloadText } from '../util/download.js'
+import { fetchComponent } from './sources.js'
 
 export const ENGINE_BIN = process.platform === 'win32' ? 'cli-proxy-api.exe' : 'cli-proxy-api'
 
@@ -32,6 +33,8 @@ export interface Manifest {
   plugins: import('./components.js').PluginsManifest
   /** 完整管理界面 */
   panel: import('./components.js').PanelManifest
+  /** 同一批文件发布成的 npm 资源包（国内下载快）；见 sources.ts */
+  npm?: import('./sources.js').NpmAssets
 }
 
 export async function loadManifest(): Promise<Manifest> {
@@ -102,7 +105,7 @@ export async function installVersion(ctx: Ctx, version: string, asset: ManifestA
     if (local) {
       data = await readFile(local)
     } else {
-      data = await download(asset.url, proxy, L('引擎', ' the engine'))
+      data = await fetchComponent({ file: asset.file, sha256: asset.sha256, url: asset.url, what: L('引擎', ' the engine'), proxy })
       const { writeFile } = await import('node:fs/promises')
       await writeFile(archive, data, { mode: 0o600 })
     }

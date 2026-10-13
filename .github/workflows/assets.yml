@@ -1,0 +1,50 @@
+# 资源包：把引擎、渠道插件包、管理界面按平台打成 npm 包 dsh-cpamc-assets-<平台> 并发布
+# （国内网络经代理从 GitHub 下载可能慢到一小时，npm 镜像快得多；setup 仍按 engine-manifest.json 的 sha256 校验）
+# 手动触发。仓库 Secrets 里有 NPM_TOKEN 就发布，没有就只打包并上传为构建产物。
+name: assets
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Download release files listed in engine-manifest.json
+        run: |
+          mkdir -p dl
+          node -e '
+            const m = require("./engine-manifest.json")
+            const urls = []
+            for (const t of Object.keys(m.npm.targets)) { urls.push(m.assets[t].url, m.plugins.assets[t].url) }
+            urls.push(m.panel.url)
+            console.log([...new Set(urls)].join("\n"))
+          ' > dl/urls.txt
+          cd dl && while read -r u; do curl -fsSL --retry 3 -O "$u"; done < urls.txt && ls -la
+      - name: Build packages (verifies sha256)
+        run: node scripts/build-assets.mjs dl build/assets
+      - name: Pack check
+        run: for d in build/assets/*/; do (cd "$d" && npm pack --dry-run 2>&1 | tail -4); done
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-cpamc-assets
+          path: build/assets
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then echo "NPM_TOKEN is not set; packages were built and uploaded as an artifact only"; exit 0; fi
+          for d in build/assets/*/; do
+            name=$(node -p "require('./$d/package.json').name"); version=$(node -p "require('./$d/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then echo "skip $name@$version"; continue; fi
+            (cd "$d" && npm publish --access public --provenance)
+          done

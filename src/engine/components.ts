@@ -13,7 +13,7 @@ import { L } from '../i18n.js'
 import { run } from '../util/exec.js'
 import { atomicWrite, ensureDir, exists, sha256, sha256File } from '../util/fs.js'
 import { extractZip } from '../util/unzip.js'
-import { download } from '../util/download.js'
+import { fetchComponent } from './sources.js'
 import { platformTarget, type ManifestAsset } from './install.js'
 
 export interface PluginsManifest {
@@ -41,9 +41,9 @@ export function pluginsVersionDir(ctx: Ctx, version: string): string {
   return join(ctx.paths.pluginsDir, version)
 }
 
-/** 下载（或读 env 指定的本地文件，测试 / 离线用），校验 sha256 */
-async function fetchVerified(url: string, expected: string, localEnv: string | undefined, what: string, proxy?: string | null): Promise<Buffer> {
-  const data = localEnv ? await readFile(localEnv) : await download(url, proxy, what)
+/** 取文件（资源包 → GitHub，见 sources.ts；或读 env 指定的本地文件，测试 / 离线用），校验 sha256 */
+async function fetchVerified(file: string, url: string, expected: string, localEnv: string | undefined, what: string, proxy?: string | null): Promise<Buffer> {
+  const data = localEnv ? await readFile(localEnv) : await fetchComponent({ file, sha256: expected, url, what, proxy })
   const actual = sha256(data)
   if (actual !== expected) {
     throw new DshModelError(
@@ -70,7 +70,7 @@ export async function installPlugins(ctx: Ctx, m: PluginsManifest, proxy?: strin
   const dir = pluginsVersionDir(ctx, m.version)
   if (await pluginsPresent(ctx, m)) return false
   const what = L('渠道插件包', 'channel plugin package')
-  const data = await fetchVerified(asset.url, asset.sha256, ctx.env.DSH_CPAMC_PLUGINS_ARCHIVE, what, proxy)
+  const data = await fetchVerified(asset.file, asset.url, asset.sha256, ctx.env.DSH_CPAMC_PLUGINS_ARCHIVE, what, proxy)
   const partial = `${dir}.partial`
   await rm(partial, { recursive: true, force: true })
   await ensureDir(partial)
@@ -99,7 +99,7 @@ export async function pluginsPresent(ctx: Ctx, m: PluginsManifest): Promise<bool
  */
 export async function installPanel(ctx: Ctx, m: PanelManifest, proxy?: string | null): Promise<boolean> {
   if ((await sha256File(ctx.paths.panelFile)) === m.sha256) return false
-  const data = await fetchVerified(m.url, m.sha256, ctx.env.DSH_CPAMC_PANEL_FILE, L('完整管理界面', 'full management interface'), proxy)
+  const data = await fetchVerified(m.file, m.url, m.sha256, ctx.env.DSH_CPAMC_PANEL_FILE, L('完整管理界面', 'full management interface'), proxy)
   await ensureDir(dirname(ctx.paths.panelFile), { owner: ctx.owner })
   await atomicWrite(ctx.paths.panelFile, data, { owner: ctx.owner, mode: 0o644 })
   return true
