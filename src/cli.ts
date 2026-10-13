@@ -14,6 +14,7 @@ import { adminRun, selfUpdate } from './commands/self.js'
 import { supervise } from './service/windows.js'
 import { bridge } from './commands/bridge.js'
 import { panel } from './commands/panel.js'
+import { migrate } from './commands/migrate.js'
 import { loginInteractive, source, sources, stats } from './commands/sources.js'
 import { createContext } from './context.js'
 import { isDshModelError } from './errors.js'
@@ -62,6 +63,7 @@ function help(): string {
   login <来源> [--accept-risk] / logout <来源>
                                        命令行登录 / 退出登录（平时请在「全部功能」里登录）
   panel [--show-key]                   打印完整管理界面的地址（--show-key 同时打印登录密钥）
+  migrate                              从 dsh-model 迁过来：Claude / Codex 登录与访问 key（只复制，不删除）
   stats                                按 key / 来源 / 模型的成功率、延迟、速度
   status                               一屏总览
   doctor [--e2e] [--all] [--model M]   逐项自检；--e2e 实测流式与工具调用
@@ -91,6 +93,7 @@ Usage: dsh-cpamc <command> [options]
   login <source> [--accept-risk] / logout <source>
                                        Sign in / out from the command line (normally sign in under All features)
   panel [--show-key]                   Print the full management interface address (--show-key also prints its sign-in key)
+  migrate                              Move over from dsh-model: Claude / Codex sign-ins and access keys (copies only)
   stats                                Success rate, latency and speed by key / source / model
   status                               Overview
   doctor [--e2e] [--all] [--model M]   Health checks; --e2e tests streaming and tool calls
@@ -149,6 +152,8 @@ export async function main(argv: string[]): Promise<number> {
       case 'logout':
         if (!a1) throw new Error(L('用法：dsh-cpamc logout <来源>', 'Usage: dsh-cpamc logout <source>'))
         return await source(ctx, 'logout', a1, {})
+      case 'migrate':
+        return await migrate(ctx)
       case 'panel':
         return await panel(ctx, { showKey: o['show-key'] })
       case 'sources':

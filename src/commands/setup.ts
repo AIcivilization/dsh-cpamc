@@ -19,6 +19,7 @@ import { bold, info, next, ok, skip, warn } from '../util/output.js'
 import { findFreePort, isPortFree } from '../util/port.js'
 import { detectProxy, normalizeProxyUrl, redactProxy } from '../util/proxy.js'
 import { ensureDaemon } from '../daemon/service.js'
+import { dshModelHome } from './migrate.js'
 import { installDshPlugin } from '../integrations/dshplugin.js'
 import { enableCaddy } from './remote.js'
 import { installAdmin } from '../service/admin.js'
@@ -56,6 +57,10 @@ export async function setup(ctx: Ctx, opts: SetupOptions): Promise<number> {
         warn(`${error.message}${error.hint ? `\n  ${error.hint}` : ''}`)
       }
       await saveAll(ctx, all)
+    }
+
+    if (await dshModelHome(ctx)) {
+      warn(L('这台机器上也装着 dsh-model：两者可以并存，但 dsh 里会有两组模型。可执行 dsh-cpamc migrate 迁移 Claude / Codex 登录与 key，确认正常后再卸载 dsh-model', 'dsh-model is also installed here: both can run, but dsh will show two model groups. Run dsh-cpamc migrate to bring over Claude / Codex sign-ins and keys, then uninstall dsh-model once everything works'))
     }
 
     info('')

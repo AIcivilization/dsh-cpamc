@@ -28,6 +28,7 @@ describe('engine contract (real binary)', () => {
     const env = await componentEnv()
     t = await tempCtx(env)
     Object.assign(process.env, {
+      DSH_MODEL_HOME: t.ctx.env.DSH_MODEL_HOME!,
       ...env,
       DSH_CPAMC_MODE: 'local',
       DSH_CPAMC_HOME: t.ctx.paths.home,

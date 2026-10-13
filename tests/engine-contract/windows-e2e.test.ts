@@ -38,6 +38,7 @@ describe.skipIf(process.platform !== 'win32')('windows end to end (real backgrou
     const env = { ...t.ctx.env }
     delete env.DSH_CPAMC_SERVICE
     Object.assign(process.env, {
+      DSH_MODEL_HOME: t.ctx.env.DSH_MODEL_HOME!,
       DSH_CPAMC_MODE: 'local',
       DSH_CPAMC_HOME: t.ctx.paths.home,
       DSH_HOME: t.ctx.dshHome,

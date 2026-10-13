@@ -15,6 +15,8 @@ export async function tempCtx(extraEnv: Record<string, string> = {}): Promise<{ 
     DSH_HOME: dshHome,
     DSH_CPAMC_DSH_VERSION: '0.2.0-rc.2',
     DSH_CPAMC_SERVICE: 'none',
+    // 测试不能看到本机真实装着的 dsh-model
+    DSH_MODEL_HOME: join(root, 'no-dsh-model'),
     ...extraEnv,
   })
   return { ctx, root, profileDir }
