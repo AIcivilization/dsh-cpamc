@@ -1,0 +1,220 @@
+// cli.ts — 参数解析与分发；统一错误输出（中英双语）与退出码
+
+import { parseArgs } from 'node:util'
+import { connect, disconnect, models } from './commands/connect.js'
+import { engine } from './commands/engine.js'
+import { key } from './commands/key.js'
+import { logs } from './commands/logs.js'
+import { remote } from './commands/remote.js'
+import { repair, service } from './commands/service.js'
+import { setup } from './commands/setup.js'
+import { doctor, status } from './commands/status.js'
+import { uninstall } from './commands/uninstall.js'
+import { adminRun, selfUpdate } from './commands/self.js'
+import { supervise } from './service/windows.js'
+import { opencode } from './commands/opencode.js'
+import { workbuddy } from './commands/workbuddy.js'
+import { bridge } from './commands/bridge.js'
+import { enableInteractive, source, sources, stats } from './commands/sources.js'
+import { createContext } from './context.js'
+import { isDshModelError } from './errors.js'
+import { L, initLang } from './i18n.js'
+import { UPSTREAMS } from './upstreams.js'
+import { dim, fail, isJsonMode, printJson, setJsonMode } from './util/output.js'
+import { pkgVersion } from './util/pkg.js'
+
+const OPTIONS = {
+  lang: { type: 'string' },
+  json: { type: 'boolean' },
+  help: { type: 'boolean', short: 'h' },
+  version: { type: 'boolean', short: 'v' },
+  port: { type: 'string' },
+  profile: { type: 'string' },
+  force: { type: 'boolean' },
+  'dry-run': { type: 'boolean' },
+  yes: { type: 'boolean', short: 'y' },
+  'keep-auth': { type: 'boolean' },
+  device: { type: 'boolean' },
+  replace: { type: 'boolean' },
+  'accept-risk': { type: 'boolean' },
+  via: { type: 'string' },
+  domain: { type: 'string' },
+  e2e: { type: 'boolean' },
+  all: { type: 'boolean' },
+  model: { type: 'string' },
+  lines: { type: 'string' },
+  proxy: { type: 'string' },
+  bridge: { type: 'boolean' },
+  'skip-opencode': { type: 'boolean' },
+  'skip-workbuddy': { type: 'boolean' },
+  'skip-dsh-plugin': { type: 'boolean' },
+  stdin: { type: 'boolean' },
+  'skip-verify': { type: 'boolean' },
+  to: { type: 'string' },
+  'remove-plugin': { type: 'boolean' },
+} as const
+
+function help(): string {
+  const ups = UPSTREAMS.map((u) => u.id).join('|')
+  return L(
+    `dsh-model ${pkgVersion()} — 把你自己的 CLI 订阅接进 dsh（本机 OpenAI 兼容端点，默认鉴权，可干净卸载）
+
+用法：dsh-model <命令> [选项]
+
+  setup [--profile P] [--proxy URL|none] [--skip-opencode] [--skip-workbuddy]
+                                       一键安装统一端点，接入 OpenCode Zen（你的 key）与 WorkBuddy（自有 bridge），并接进 dsh；可重复执行
+  opencode [status|key|remove] [--stdin] [--skip-verify]
+                                       OpenCode Zen：设置 / 更换 key，或移除
+  workbuddy [status|login [cn|ai]|logout [cn|ai]|enable|refresh|disable]
+                                       WorkBuddy：桌面 App 登录态，或 login 打印链接、在任意浏览器授权（服务器可用）
+  sources                              来源列表：开关、登录状态、账号、模型数
+  source enable|disable|logout <来源> [--accept-risk]
+                                       打开（未登录就打印链接登录）/ 关闭（保留登录）/ 退出登录
+  login <来源> / logout <来源>          同 source enable / source logout
+  stats                                按 key / 来源 / 模型的成功率、延迟、速度
+  status                               一屏总览
+  doctor [--e2e] [--all] [--model M]   逐项自检；--e2e 实测流式与工具调用
+  connect-dsh [--dry-run] [--force]    写入 / 刷新 dsh 配置
+  disconnect-dsh                       还原 dsh 配置
+  models [sync]                        列出模型 / 同步到 dsh
+  key list|add|revoke|rotate <名称>     管理访问 key（每台设备一把）
+  remote enable --via ssh|tailscale|caddy [--domain D] / remote disable
+                                       让你自己的其他设备访问
+  engine version|upgrade [版本]|rollback 引擎版本管理
+  service status|install|start|stop|restart|uninstall
+  repair                               按台账修复配置、服务与接线
+  logs [--lines N] [--bridge]          引擎 / bridge 日志
+  update [--to 版本]                   更新到 npm 上的最新版（程序、dsh 插件、服务一起）
+  uninstall [--yes] [--keep-auth]      干净卸载
+
+通用选项：--lang zh|en  --json  --help  --version
+环境变量：DSH_HOME、DSH_MODEL_HOME、DSH_MODEL_LANG`,
+    `dsh-model ${pkgVersion()} — wire your own CLI subscriptions into dsh (local OpenAI-compatible endpoint, auth by default, clean uninstall)
+
+Usage: dsh-model <command> [options]
+
+  setup [--profile P] [--proxy URL|none] [--skip-opencode] [--skip-workbuddy]
+                                       Install the unified endpoint, connect OpenCode Zen (your key) and WorkBuddy (own bridge), wire into dsh; idempotent
+  opencode [status|key|remove] [--stdin] [--skip-verify]
+                                       OpenCode Zen: set / change the key, or remove
+  workbuddy [status|login [cn|ai]|logout [cn|ai]|enable|refresh|disable]
+                                       WorkBuddy: desktop app sign-in, or login prints a link to approve in any browser (works on servers)
+  sources                              Sources: switch, sign-in state, account, models
+  source enable|disable|logout <source> [--accept-risk]
+                                       Turn on (prints a login link if needed) / off (keeps sign-in) / sign out
+  login <source> / logout <source>     Same as source enable / source logout
+  stats                                Success rate, latency and speed by key / source / model
+  status                               Overview
+  doctor [--e2e] [--all] [--model M]   Health checks; --e2e tests streaming and tool calls
+  connect-dsh [--dry-run] [--force]    Write / refresh dsh config
+  disconnect-dsh                       Restore dsh config
+  models [sync]                        List models / sync them to dsh
+  key list|add|revoke|rotate <name>    Manage access keys (one per device)
+  remote enable --via ssh|tailscale|caddy [--domain D] / remote disable
+                                       Access from your other devices
+  engine version|upgrade [ver]|rollback  Engine version management
+  service status|install|start|stop|restart|uninstall
+  repair                               Repair config, service and wiring from the ledger
+  logs [--lines N] [--bridge]          Engine / bridge logs
+  update [--to ver]                    Update to the latest npm version (program, dsh plugin and services)
+  uninstall [--yes] [--keep-auth]      Clean uninstall
+
+Global: --lang zh|en  --json  --help  --version
+Env: DSH_HOME, DSH_MODEL_HOME, DSH_MODEL_LANG`,
+  )
+}
+
+export async function main(argv: string[]): Promise<number> {
+  let parsed
+  try {
+    parsed = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true })
+  } catch (error) {
+    initLang()
+    fail(String((error as Error).message))
+    return 2
+  }
+  const { values: o, positionals: [cmd, a1, a2] } = parsed
+  initLang(o.lang)
+  setJsonMode(Boolean(o.json))
+  if (o.version) {
+    console.log(pkgVersion())
+    return 0
+  }
+  if (o.help || !cmd || cmd === 'help') {
+    console.log(help())
+    return 0
+  }
+
+  try {
+    const ctx = await createContext()
+    const port = o.port ? Number(o.port) : undefined
+    if (port !== undefined && !(Number.isInteger(port) && port > 0 && port < 65536)) throw new Error(L(`端口不合法：${o.port}`, `Invalid port: ${o.port}`))
+    switch (cmd) {
+      case 'setup':
+        return await setup(ctx, { port, profile: o.profile, force: o.force, proxy: o.proxy, skipOpencode: o['skip-opencode'], skipWorkbuddy: o['skip-workbuddy'], skipDshPlugin: o['skip-dsh-plugin'] })
+      case 'opencode':
+        return await opencode(ctx, a1, { stdin: o.stdin, skipVerify: o['skip-verify'] })
+      case 'workbuddy':
+        return await workbuddy(ctx, a1, a2)
+      case 'bridge':
+        return await bridge(ctx, a1)
+      case 'login':
+        // 统一走守护进程：链接 + 码 / 贴回跳转地址，服务器上不需要浏览器（设计 §14.2）
+        if (!a1) throw new Error(L('用法：dsh-model login <来源>（dsh-model sources 查看）', 'Usage: dsh-model login <source> (see dsh-model sources)'))
+        return await enableInteractive(ctx, a1, { acceptRisk: o['accept-risk'] })
+      case 'logout':
+        if (!a1) throw new Error(L('用法：dsh-model logout <来源>', 'Usage: dsh-model logout <source>'))
+        return await source(ctx, 'logout', a1, {})
+      case 'sources':
+        return await sources(ctx, { all: o.all })
+      case 'source':
+        return await source(ctx, a1, a2, { acceptRisk: o['accept-risk'] })
+      case 'stats':
+        return await stats(ctx)
+      case 'status':
+        return await status(ctx)
+      case 'doctor':
+        return await doctor(ctx, { e2e: o.e2e, all: o.all, model: o.model })
+      case 'connect-dsh':
+        return await connect(ctx, { dryRun: o['dry-run'], profile: o.profile, force: o.force })
+      case 'disconnect-dsh':
+        return await disconnect(ctx)
+      case 'models':
+        return await models(ctx, a1)
+      case 'key':
+        return await key(ctx, a1, a2)
+      case 'remote':
+        return await remote(ctx, a1, { via: o.via, domain: o.domain })
+      case 'engine':
+        return await engine(ctx, a1, a2)
+      case 'service':
+        // Windows 后台服务的常驻进程（由隐藏窗口脚本启动，不是给人用的）
+        if (a1 === 'supervise' && a2) return await supervise(a2)
+        return await service(ctx, a1)
+      case 'repair':
+        return await repair(ctx)
+      case 'logs':
+        return await logs(ctx, o.lines ? Number(o.lines) : undefined, o.bridge ? 'bridge' : 'engine')
+      case 'uninstall':
+        return await uninstall(ctx, { yes: o.yes, keepAuth: o['keep-auth'], removePlugin: o['remove-plugin'] })
+      case 'admin-run':
+        return await adminRun(ctx)
+      case 'self-update':
+      case 'update':
+        return await selfUpdate(ctx, { to: o.to })
+      default:
+        fail(L(`未知命令：${cmd}`, `Unknown command: ${cmd}`))
+        console.log(dim(L('查看帮助：dsh-model --help', 'See: dsh-model --help')))
+        return 2
+    }
+  } catch (error) {
+    if (isJsonMode()) {
+      printJson({ ok: false, code: isDshModelError(error) ? error.code : 'error', message: (error as Error).message, hint: isDshModelError(error) ? error.hint : undefined })
+    } else {
+      fail((error as Error).message)
+      if (isDshModelError(error) && error.hint) console.error(dim(`  ${error.hint}`))
+      if (!isDshModelError(error) && process.env.DSH_MODEL_DEBUG) console.error((error as Error).stack)
+    }
+    return 1
+  }
+}

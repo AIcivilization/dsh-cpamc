@@ -1,4 +1,7 @@
 node_modules/
 *.log
 .DS_Store
+.env
+tests/.cache/
 docs/IMPLEMENTATION_HANDOFF.md
+dist/
