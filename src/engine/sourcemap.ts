@@ -54,3 +54,24 @@ export async function subscriptionMap(ctx: Ctx, port: number): Promise<Subscript
   }
   return { models, noAccess }
 }
+
+/** 每个来源现在能服务的模型 id（只看没停用的凭据）；引擎没起来就返回 null */
+export async function offeredModels(ctx: Ctx, port: number): Promise<Map<string, string[]> | null> {
+  let mgmt: Mgmt
+  let creds: Awaited<ReturnType<Mgmt['credentials']>>
+  try {
+    mgmt = await Mgmt.forCtx(ctx, port)
+    creds = await mgmt.credentials()
+  } catch {
+    return null
+  }
+  const out = new Map<string, string[]>()
+  for (const def of SOURCES) {
+    const ids = new Set<string>()
+    for (const c of credsFor(creds, def).filter((x) => !x.disabled)) {
+      for (const m of await mgmt.credentialModels(c.name).catch(() => [])) ids.add(m.id)
+    }
+    if (ids.size) out.set(def.id, [...ids])
+  }
+  return out
+}

@@ -18,6 +18,7 @@ import { DSH_KEY_NAME, activeKeys, type KeyStore } from '../keys.js'
 import { PLUGIN_IDS } from '../sources.js'
 import type { Config, State } from '../state.js'
 import { readText, writeInPlace } from '../util/fs.js'
+import type { AliasEntry } from './alias.js'
 import { pluginsVersionDir } from './components.js'
 import { loadManifest } from './install.js'
 import { ensureMgmt } from './mgmt.js'
@@ -42,6 +43,8 @@ export interface OwnedInput {
   keys: KeyStore
   /** 要写的出站代理；undefined = 不动文件里的值 */
   proxy?: string | null
+  /** 同名模型别名：next 是这次要有的，previous 是上次 dsh-cpamc 写的（要先摘掉）；undefined = 不动 */
+  aliases?: { next: AliasEntry[]; previous: AliasEntry[] }
 }
 
 /** 初始配置：只在 engine.yaml 不存在时用 */
@@ -103,11 +106,34 @@ export function applyOwned(doc: Document, o: OwnedInput): void {
     if (o.proxy) set(['requests', 'proxy-url'], o.proxy)
     else if (doc.hasIn(['requests', 'proxy-url'])) doc.deleteIn(['requests', 'proxy-url'])
   }
+  if (o.aliases) applyAliases(doc, o.aliases.next, o.aliases.previous)
   const before = engineApiKeys(doc)
   const merged = mergeApiKeys(before, o.keys)
   if (merged.join('\n') !== before.join('\n') || !isSeq(doc.getIn(['access', 'api-keys'], true))) {
     doc.setIn(['access', 'api-keys'], doc.createNode(merged))
   }
+}
+
+/** oauth.model-alias.<来源>：摘掉上次自己写的，补上这次要有的；用户自己写的同名条目优先，不覆盖 */
+export function applyAliases(doc: Document, next: AliasEntry[], previous: AliasEntry[]): void {
+  const mine = (source: string, name: string, alias: string) => previous.some((p) => p.source === source && p.name === name && p.alias === alias)
+  const sources = new Set([...next.map((e) => e.source), ...previous.map((e) => e.source)])
+  for (const source of sources) {
+    const path = ['oauth', 'model-alias', source]
+    const cur = doc.getIn(path)
+    const items = (Array.isArray((cur as { toJSON?: () => unknown })?.toJSON?.()) ? ((cur as { toJSON: () => unknown[] }).toJSON() as Record<string, unknown>[]) : []).filter(
+      (i) => !(i && typeof i === 'object' && mine(source, String(i.name ?? ''), String(i.alias ?? ''))),
+    )
+    for (const e of next.filter((x) => x.source === source)) {
+      if (!items.some((i) => String(i?.name ?? '').toLowerCase() === e.name.toLowerCase())) items.push({ name: e.name, alias: e.alias })
+    }
+    const before = JSON.stringify((cur as { toJSON?: () => unknown })?.toJSON?.() ?? null)
+    if (items.length === 0) {
+      if (doc.hasIn(path)) doc.deleteIn(path)
+    } else if (JSON.stringify(items) !== before) doc.setIn(path, doc.createNode(items))
+  }
+  const root = doc.getIn(['oauth', 'model-alias'])
+  if (root && isMap(root) && root.items.length === 0) doc.deleteIn(['oauth', 'model-alias'])
 }
 
 /**
@@ -138,7 +164,7 @@ export interface WriteResult {
  * 写 engine.yaml（只动自己的键，内容没变就不写，避免引擎无谓的热重载）。
  * 会就地修改 keys（对账吊销）与 state.engineOwned（记下这次写进去的 key 与代理）；调用方负责落盘。
  */
-export async function writeEngineConfig(ctx: Ctx, config: Config, keys: KeyStore, state: State): Promise<WriteResult> {
+export async function writeEngineConfig(ctx: Ctx, config: Config, keys: KeyStore, state: State, opts: { aliases?: AliasEntry[] } = {}): Promise<WriteResult> {
   if (activeKeys(keys).length === 0) {
     throw new DshModelError('no_api_keys', L('没有可用的 key，拒绝写引擎配置（空 key 列表会让引擎不做鉴权）', 'No active keys; refusing to write engine config (an empty key list disables engine auth)'))
   }
@@ -153,6 +179,7 @@ export async function writeEngineConfig(ctx: Ctx, config: Config, keys: KeyStore
     pluginsDir: pluginsVersionDir(ctx, manifest.plugins.version),
     keys,
     ...(proxyChanged ? { proxy: config.proxy ?? null } : {}),
+    ...(opts.aliases ? { aliases: { next: opts.aliases, previous: owned.aliases ?? [] } } : {}),
   }
 
   const text = await readText(ctx.paths.engineYaml)
@@ -168,7 +195,7 @@ export async function writeEngineConfig(ctx: Ctx, config: Config, keys: KeyStore
     revoked = reconcileRemovedKeys(engineApiKeys(doc), keys, owned.keys)
   }
   applyOwned(doc, input)
-  state.engineOwned = { keys: activeKeys(keys).map((k) => keyHash(k.key)), proxy: config.proxy ?? null }
+  state.engineOwned = { keys: activeKeys(keys).map((k) => keyHash(k.key)), proxy: config.proxy ?? null, aliases: opts.aliases ?? owned.aliases ?? [] }
 
   const out = doc.toString()
   if (text === out) return { written: false, revoked }

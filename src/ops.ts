@@ -3,7 +3,8 @@
 import type { Ctx } from './context.js'
 import { connectDshGroups, type DshGroup } from './dsh/connect.js'
 import { listModels, waitModelsChange } from './engine/client.js'
-import { subscriptionMap } from './engine/sourcemap.js'
+import { offeredModels, subscriptionMap } from './engine/sourcemap.js'
+import { computeAliases, type AliasEntry } from './engine/alias.js'
 import { pickedFor } from './dsh/pick.js'
 import { writeEngineConfig } from './engine/config.js'
 import { DshModelError, isDshModelError } from './errors.js'
@@ -35,8 +36,8 @@ export function dshKey(keys: KeyStore): string {
 }
 
 /** 写 engine.yaml（只动自己的键，内容变了才写，引擎热重载）。在完整管理界面里删掉的 key 同步成吊销。返回是否写了 */
-export async function applyEngineConfig(ctx: Ctx, all: All): Promise<boolean> {
-  const r = await writeEngineConfig(ctx, all.config, all.keys, all.state)
+export async function applyEngineConfig(ctx: Ctx, all: All, opts: { aliases?: AliasEntry[] } = {}): Promise<boolean> {
+  const r = await writeEngineConfig(ctx, all.config, all.keys, all.state, opts)
   if (r.revoked.length) {
     await saveKeys(ctx, all.keys)
     warn(L(`这些 key 在完整管理界面里被删除了，已标记为吊销：${r.revoked.join('、')}`, `These keys were deleted in the full management interface and are now revoked: ${r.revoked.join(', ')}`))
@@ -119,8 +120,15 @@ export async function dshCandidates(ctx: Ctx, all: All, ids?: string[]): Promise
   return out
 }
 
-/** 全量同步：写 engine.yaml（引擎热重载）→ 把模型清单写进 dsh。setup、key 变化、来源显示 / 隐藏、凭据变化时都走这里 */
+/**
+ * 全量同步：算同名模型别名 → 写 engine.yaml（引擎热重载）→ 等模型列表跟上 → 把模型清单写进 dsh。
+ * setup、key 变化、来源显示 / 隐藏、凭据变化时都走这里。引擎没在跑时只写配置，别名不动。
+ */
 export async function syncAll(ctx: Ctx, all: All, opts: { quiet?: boolean } = {}): Promise<string[]> {
-  await applyEngineConfig(ctx, all)
-  return syncModels(ctx, all, { quiet: opts.quiet })
+  const offered = await offeredModels(ctx, all.config.port)
+  const aliases = offered ? computeAliases(offered, all.state.engineOwned?.aliases ?? []) : undefined
+  const changedAliases = aliases !== undefined && JSON.stringify(aliases) !== JSON.stringify(all.state.engineOwned?.aliases ?? [])
+  const before = changedAliases ? await listModels(all.config.port, dshKey(all.keys)).then((m) => m.map((x) => x.id)).catch(() => undefined) : undefined
+  await applyEngineConfig(ctx, all, aliases ? { aliases } : {})
+  return syncModels(ctx, all, { quiet: opts.quiet, ...(before ? { before } : {}) })
 }
