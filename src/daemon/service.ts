@@ -7,13 +7,16 @@ import { L } from '../i18n.js'
 import type { All } from '../ops.js'
 import { serviceFor } from '../service/index.js'
 import { ok, skip } from '../util/output.js'
-import { findFreePort, isPortFree } from '../util/port.js'
+import { isPortFree } from '../util/port.js'
+import { dshModelPorts, freePortAvoiding } from '../commands/migrate.js'
 
 export async function ensureDaemon(ctx: Ctx, all: All, opts: { restart?: boolean } = {}): Promise<void> {
   let port = all.config.bridge?.port || BRIDGE_DEFAULT_PORT
   const existing = await loadBridgeConfig(ctx.paths.home)
   const ours = existing && (await bridgeHealthy(existing.port, existing.secret))
-  if (!ours && !(await isPortFree(port))) port = await findFreePort(port + 1)
+  // 避开 dsh-model 的端口（它开机会起来），以及我们自己引擎的端口
+  const avoid = [...(await dshModelPorts(ctx)), all.config.port]
+  if (avoid.includes(port) || (!ours && !(await isPortFree(port)))) port = await freePortAvoiding(port + 1, avoid, isPortFree)
   all.config.bridge = { ...all.config.bridge, port }
   const cfg = await ensureBridgeConfig(ctx.paths.home, port, ctx.owner)
   if (ctx.serviceDisabled) {

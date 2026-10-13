@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { dshModelHome, migrate } from '../../src/commands/migrate.js'
+import { dshModelHome, dshModelPorts, freePortAvoiding, migrate } from '../../src/commands/migrate.js'
 import { addKey, loadKeys, saveKeys, type KeyStore } from '../../src/keys.js'
 import { tempCtx } from './helpers.js'
 
@@ -38,5 +38,19 @@ describe('migrate from dsh-model', () => {
     // 源目录原样
     expect((await readdir(join(src, 'auth'))).sort()).toEqual(['codex-a@example.com.json', 'kimi-x.json'])
     expect(JSON.parse(await readFile(join(src, 'keys.json'), 'utf8')).keys).toHaveLength(3)
+  })
+
+  it('knows dsh-model ports even when it is not running, and picks a port that avoids them', async () => {
+    const t = await tempCtx()
+    expect(await dshModelPorts(t.ctx)).toEqual([])
+    const src = join(t.root, 'old-dsh-model')
+    t.ctx.env.DSH_MODEL_HOME = src
+    await mkdir(src, { recursive: true })
+    await writeFile(join(src, 'state.json'), '{}')
+    await writeFile(join(src, 'config.json'), JSON.stringify({ port: 8317, bridge: { port: 18317 } }))
+    expect(await dshModelPorts(t.ctx)).toEqual([8317, 18317])
+    const taken = new Set([8327, 8328])
+    expect(await freePortAvoiding(8317, [8317, 18317], async (p) => !taken.has(p))).toBe(8318)
+    expect(await freePortAvoiding(8327, [8329], async (p) => !taken.has(p))).toBe(8330)
   })
 })

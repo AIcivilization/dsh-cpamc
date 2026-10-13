@@ -19,7 +19,7 @@ import { bold, info, next, ok, skip, warn } from '../util/output.js'
 import { findFreePort, isPortFree } from '../util/port.js'
 import { detectProxy, normalizeProxyUrl, redactProxy } from '../util/proxy.js'
 import { ensureDaemon } from '../daemon/service.js'
-import { dshModelHome } from './migrate.js'
+import { dshModelHome, dshModelPorts, freePortAvoiding } from './migrate.js'
 import { installDshPlugin } from '../integrations/dshplugin.js'
 import { enableCaddy } from './remote.js'
 import { installAdmin } from '../service/admin.js'
@@ -171,8 +171,14 @@ export async function ensureEngine(ctx: Ctx, all: All, opts: { port?: number } =
   if (created) await saveKeys(ctx, keys)
 
   if (opts.port) config.port = opts.port
-  if (!(await isPortFree(config.port)) && !(await portIsOurs(config.port, keys))) {
-    const free = await findFreePort(config.port + 1)
+  // dsh-model 的端口即使现在空着也要避开：它的系统服务开机会起来抢（--port 明确指定时尊重用户）
+  const avoid = opts.port ? [] : await dshModelPorts(ctx)
+  if (avoid.includes(config.port)) {
+    const free = await freePortAvoiding(config.port + 10, avoid, isPortFree)
+    warn(L(`端口 ${config.port} 是 dsh-model 的，避开它，改用 ${free}`, `Port ${config.port} belongs to dsh-model; using ${free} instead`))
+    config.port = free
+  } else if (!(await isPortFree(config.port)) && !(await portIsOurs(config.port, keys))) {
+    const free = await freePortAvoiding(config.port + 1, avoid, isPortFree)
     warn(L(`端口 ${config.port} 被其他程序占用，改用 ${free}`, `Port ${config.port} is taken by another program; using ${free}`))
     config.port = free
   }

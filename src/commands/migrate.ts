@@ -24,6 +24,23 @@ export async function dshModelHome(ctx: Ctx): Promise<string | null> {
   return (await exists(join(dir, 'state.json'))) ? dir : null
 }
 
+/**
+ * dsh-model 用着（或开机会用）的端口：它的引擎与守护进程。即使它现在没在跑，系统服务开机也会把它拉起来，
+ * 和我们抢同一个端口——谁先起谁拿到，另一个就起不来。所以 setup 要直接避开。
+ */
+export async function dshModelPorts(ctx: Ctx): Promise<number[]> {
+  const home = await dshModelHome(ctx)
+  if (!home) return []
+  const cfg = await readJson<{ port?: unknown; bridge?: { port?: unknown } }>(join(home, 'config.json'))
+  return [cfg?.port, cfg?.bridge?.port].filter((p): p is number => typeof p === 'number' && p > 0)
+}
+
+/** 从 start 起找一个空闲、又不和 avoid 撞的端口 */
+export async function freePortAvoiding(start: number, avoid: number[], isFree: (p: number) => Promise<boolean>): Promise<number> {
+  for (let p = start; p < start + 100; p++) if (!avoid.includes(p) && (await isFree(p))) return p
+  throw new Error(`no free port in ${start}..${start + 99}`)
+}
+
 const MIGRATABLE = ['codex-', 'claude-']
 
 export async function migrate(ctx: Ctx): Promise<number> {
