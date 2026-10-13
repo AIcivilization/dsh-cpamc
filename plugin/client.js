@@ -497,18 +497,19 @@ window.__ModuleLoader__.load({
       const open = async () => {
         setErr('')
         setBusy(true)
-        // 先同步开一个空窗口（在点击的手势里），拿到地址再跳过去，免得被拦截弹窗
-        let w = null
-        try { w = window.open('about:blank', '_blank') } catch { w = null }
         try {
           const r = await api('POST', '/panel/open')
-          setRes(r)
-          if (!r.running) setErr(L('模型服务没有起来，先在「服务」里点「修复」。', 'The model service is not running; press Repair under Service first.'))
+          let opened = false
+          // 只有拿到能直接打开的地址才开窗口（VPS 上还没有受保护入口时不开，免得闪一下空白页）
           if (r.url && !r.tunnel && r.running) {
-            if (w) { w.opener = null; w.location.href = r.url } else window.open(r.url, '_blank', 'noopener')
-          } else if (w) w.close()
+            try {
+              const w = window.open(r.url, '_blank')
+              if (w) { w.opener = null; opened = true }
+            } catch { opened = false }
+          }
+          setRes({ ...r, opened })
+          if (!r.running) setErr(L('模型服务没有起来，先在「服务」里点「修复」。', 'The model service is not running; press Repair under Service first.'))
         } catch (e) {
-          if (w) w.close()
           setErr(e.message)
         } finally {
           setBusy(false)
@@ -526,10 +527,13 @@ window.__ModuleLoader__.load({
           h('div', { style: { ...S.line, marginTop: 10 } },
             h('span', { style: { ...S.meta, ...S.grow } }, L('打开后在登录页填入管理密钥：点右边复制（不会显示出来，30 秒后自动从剪贴板清除）。', 'On its sign-in page, paste the management key: copy it with the button on the right (never displayed; cleared from the clipboard after 30 seconds).')),
             h(CopyButton, { get: async () => (await api('POST', '/panel/key')).key, label: L('复制登录密钥', 'Copy sign-in key'), clearAfter: 30_000 })),
+          res && res.url && !res.tunnel && res.running && !res.opened ? h('div', { style: { ...S.meta, marginTop: 8 } },
+            L('浏览器没有自动打开新窗口，点这里打开：', 'The browser did not open a new window; open it here: '),
+            h('a', { href: res.url, target: '_blank', rel: 'noopener noreferrer', style: { color: C.accent } }, res.url)) : null,
           res?.vps && res.apiBase && !res.tunnel ? h('div', { style: { ...S.meta, marginTop: 8 } },
             L('第一次打开时，在登录页勾选「自定义连接地址」，填入：', 'The first time, tick "custom connection address" on the sign-in page and enter:'),
             h('div', { style: { ...S.line, marginTop: 4 } }, h('code', { style: { ...S.mono, ...S.grow } }, res.apiBase), h(CopyButton, { get: res.apiBase }))) : null,
-          res?.tunnel ? h('div', { style: { ...S.meta, marginTop: 8, lineHeight: 1.7 } },
+          res?.tunnel ? h('div', { style: { fontSize: 12, color: C.text, marginTop: 10, padding: '10px 12px', border: `1px solid ${C.warn}`, borderRadius: 8, lineHeight: 1.7 } },
             L('这台 dsh-vps 服务器还没有为完整管理界面开通受保护的入口（需要更新 dsh-vps）。现在可以先在你自己的电脑上执行下面的命令，再在本机浏览器打开：', 'This dsh-vps server does not yet provide a protected entry for the full interface (dsh-vps needs an update). For now, run this on your own computer, then open the address in a local browser:'),
             h('div', { style: { ...S.line, marginTop: 4 } }, h('code', { style: { ...S.mono, ...S.grow } }, res.tunnel), h(CopyButton, { get: res.tunnel })),
             h('div', { style: { ...S.line, marginTop: 4 } }, h('code', { style: { ...S.mono, ...S.grow } }, res.url), h(CopyButton, { get: res.url }))) : null,

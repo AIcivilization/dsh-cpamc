@@ -13,6 +13,7 @@ import { L } from '../i18n.js'
 import { run } from '../util/exec.js'
 import { atomicWrite, ensureDir, exists, sha256, sha256File } from '../util/fs.js'
 import { extractZip } from '../util/unzip.js'
+import { download } from '../util/download.js'
 import { platformTarget, type ManifestAsset } from './install.js'
 
 export interface PluginsManifest {
@@ -41,14 +42,8 @@ export function pluginsVersionDir(ctx: Ctx, version: string): string {
 }
 
 /** 下载（或读 env 指定的本地文件，测试 / 离线用），校验 sha256 */
-async function fetchVerified(url: string, expected: string, localEnv: string | undefined, what: string): Promise<Buffer> {
-  let data: Buffer
-  if (localEnv) data = await readFile(localEnv)
-  else {
-    const res = await fetch(url)
-    if (!res.ok) throw new DshModelError('download_failed', L(`下载${what}失败：HTTP ${res.status}`, `Failed to download ${what}: HTTP ${res.status}`), url)
-    data = Buffer.from(await res.arrayBuffer())
-  }
+async function fetchVerified(url: string, expected: string, localEnv: string | undefined, what: string, proxy?: string | null): Promise<Buffer> {
+  const data = localEnv ? await readFile(localEnv) : await download(url, proxy, what)
   const actual = sha256(data)
   if (actual !== expected) {
     throw new DshModelError(
@@ -64,7 +59,7 @@ async function fetchVerified(url: string, expected: string, localEnv: string | u
  * 装渠道插件包到 plugins/<版本>/（已装且齐全就跳过）。返回是否真的装了。
  * DSH_CPAMC_PLUGINS_ARCHIVE 可指向本地 zip（离线 / 测试），同样要过 sha256 校验。
  */
-export async function installPlugins(ctx: Ctx, m: PluginsManifest, target = platformTarget()): Promise<boolean> {
+export async function installPlugins(ctx: Ctx, m: PluginsManifest, proxy?: string | null, target = platformTarget()): Promise<boolean> {
   const asset = m.assets[target]
   if (!asset) {
     throw new DshModelError(
@@ -75,7 +70,7 @@ export async function installPlugins(ctx: Ctx, m: PluginsManifest, target = plat
   const dir = pluginsVersionDir(ctx, m.version)
   if (await pluginsPresent(ctx, m)) return false
   const what = L('渠道插件包', 'channel plugin package')
-  const data = await fetchVerified(asset.url, asset.sha256, ctx.env.DSH_CPAMC_PLUGINS_ARCHIVE, what)
+  const data = await fetchVerified(asset.url, asset.sha256, ctx.env.DSH_CPAMC_PLUGINS_ARCHIVE, what, proxy)
   const partial = `${dir}.partial`
   await rm(partial, { recursive: true, force: true })
   await ensureDir(partial)
@@ -102,9 +97,9 @@ export async function pluginsPresent(ctx: Ctx, m: PluginsManifest): Promise<bool
  * 放好锁定版本的管理界面。文件已在且校验一致就跳过；不一致（被换过）就换回锁定版本。返回是否写了。
  * DSH_CPAMC_PANEL_FILE 可指向本地文件（离线 / 测试）。
  */
-export async function installPanel(ctx: Ctx, m: PanelManifest): Promise<boolean> {
+export async function installPanel(ctx: Ctx, m: PanelManifest, proxy?: string | null): Promise<boolean> {
   if ((await sha256File(ctx.paths.panelFile)) === m.sha256) return false
-  const data = await fetchVerified(m.url, m.sha256, ctx.env.DSH_CPAMC_PANEL_FILE, L('完整管理界面', 'full management interface'))
+  const data = await fetchVerified(m.url, m.sha256, ctx.env.DSH_CPAMC_PANEL_FILE, L('完整管理界面', 'full management interface'), proxy)
   await ensureDir(dirname(ctx.paths.panelFile), { owner: ctx.owner })
   await atomicWrite(ctx.paths.panelFile, data, { owner: ctx.owner, mode: 0o644 })
   return true

@@ -36,6 +36,8 @@ node bin/dsh-cpamc.js setup
 
 `setup` 可以重复执行。之后在 DSH 的「设置 → dsh-cpamc」里点「全部功能」登录来源。
 
+> 在 DSH 的插件管理里安装时，如果报 `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`：这是 DSH 的包管理器在保护刚发布不到一天的包（报错里点名的那个，可能是 dsh-cpamc，也可能是你已经装着的其他插件）。过一段时间点「重试」即可；或者改用上面的 `dsh-cpamc setup`，它安装的是明确指定的版本。
+
 ## 常用命令
 
 | 命令 | 作用 |

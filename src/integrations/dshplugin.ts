@@ -71,7 +71,14 @@ export async function installDshPlugin(ctx: Ctx, all: All, opts: { version?: str
   const code = await dshPlugin(ctx, profile, ['add', want.install, '--config.strict-dep-builds=false'], all.config.proxy)
   const installed = await profileHasDependency(ctx, profile, PLUGIN_NAME)
   if (code !== 0 || !installed) {
-    throw new DshModelError('plugin_install_failed', L(`把 dsh-cpamc 装进 dsh 失败（退出码 ${code}）`, `Failed to install dsh-cpamc into dsh (exit code ${code})`), L('可以在 dsh 的插件市场搜索 dsh-cpamc 安装', 'You can install it from the dsh plugin marketplace (search dsh-cpamc)'))
+    throw new DshModelError(
+      'plugin_install_failed',
+      L(`把 dsh-cpamc 装进 dsh 失败（退出码 ${code}）`, `Failed to install dsh-cpamc into dsh (exit code ${code})`),
+      L(
+        '如果上面有 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION：这是 dsh 的包管理器在保护刚发布不到一天的插件（提到的是哪个包，就是哪个包刚发布），不是 dsh-cpamc 本身的问题。过一段时间重新执行 dsh-cpamc setup 即可，模型服务这一步不受影响。网络错误则检查代理后重试。',
+        'If the output above shows ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION: dsh\'s package manager is holding back a plugin released less than a day ago (the package it names is the one just released); it is not a dsh-cpamc problem. Re-run dsh-cpamc setup later; the model service step is unaffected. For network errors, check the proxy and retry.',
+      ),
+    )
   }
   all.state.plugins = [...(all.state.plugins ?? []).filter((p) => p.name !== PLUGIN_NAME), { name: PLUGIN_NAME, version: installed, installedByUs: true, installedAt: new Date().toISOString() }]
   ok(L(`dsh 插件已安装（${installed}）：重启一次 dsh，在「设置 → dsh-cpamc」里管理来源、用量和 key`, `dsh plugin installed (${installed}): restart dsh once, then manage sources, usage and keys in Settings → dsh-cpamc`))

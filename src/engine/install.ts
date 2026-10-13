@@ -4,17 +4,15 @@
 // 版本目录 engine/versions/<v>/，current 软链指向在用版本，升级与回滚只切软链。
 // Windows：发布包是 zip、程序叫 cli-proxy-api.exe；建软链要管理员，所以 current 用目录联接（junction），不需要权限。
 
-import { createWriteStream } from 'node:fs'
 import { chmod, mkdir, readFile, readlink, rename, rm, symlink, unlink } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { Readable } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
 import type { Ctx } from '../context.js'
 import { DshModelError } from '../errors.js'
 import { L } from '../i18n.js'
 import { run } from '../util/exec.js'
 import { ensureDir, exists, sha256 } from '../util/fs.js'
 import { PKG_ROOT } from '../util/pkg.js'
+import { download, downloadText } from '../util/download.js'
 
 export const ENGINE_BIN = process.platform === 'win32' ? 'cli-proxy-api.exe' : 'cli-proxy-api'
 
@@ -71,12 +69,16 @@ export async function currentVersion(ctx: Ctx): Promise<string | null> {
 }
 
 /** 从上游发布的 checksums.txt 取某版本的资产（engine upgrade <ver> 指定了清单外版本时用） */
-export async function fetchUpstreamAsset(manifest: Manifest, version: string, target: string): Promise<ManifestAsset> {
+export async function fetchUpstreamAsset(manifest: Manifest, version: string, target: string, proxy?: string | null): Promise<ManifestAsset> {
   const base = `https://github.com/${manifest.repo}/releases/download/v${version}`
   const file = assetFileName(version, target)
-  const res = await fetch(`${base}/checksums.txt`)
-  if (!res.ok) throw new DshModelError('engine_version_not_found', L(`找不到引擎版本 v${version}（HTTP ${res.status}）`, `Engine version v${version} not found (HTTP ${res.status})`))
-  const line = (await res.text()).split('\n').find((l) => l.trim().endsWith(file))
+  let text: string
+  try {
+    text = await downloadText(`${base}/checksums.txt`, proxy)
+  } catch (error) {
+    throw new DshModelError('engine_version_not_found', L(`找不到引擎版本 v${version}：${(error as Error).message}`, `Engine version v${version} not found: ${(error as Error).message}`))
+  }
+  const line = text.split('\n').find((l) => l.trim().endsWith(file))
   const sha = line?.trim().split(/\s+/)[0]
   if (!sha || !/^[0-9a-f]{64}$/.test(sha)) throw new DshModelError('engine_checksum_missing', L(`v${version} 的 checksums.txt 里没有 ${file}`, `${file} is missing from v${version} checksums.txt`))
   return { file, url: `${base}/${file}`, sha256: sha }
@@ -86,7 +88,7 @@ export async function fetchUpstreamAsset(manifest: Manifest, version: string, ta
  * 安装某版本到 versions/<v>/（已装就跳过）。返回是否真的装了。
  * DSH_CPAMC_ENGINE_ARCHIVE 可指向本地 tar.gz（离线 / 测试），同样要过 sha256 校验。
  */
-export async function installVersion(ctx: Ctx, version: string, asset: ManifestAsset): Promise<boolean> {
+export async function installVersion(ctx: Ctx, version: string, asset: ManifestAsset, proxy?: string | null): Promise<boolean> {
   const bin = versionBinary(ctx, version)
   if (await exists(bin)) return false
 
@@ -100,10 +102,9 @@ export async function installVersion(ctx: Ctx, version: string, asset: ManifestA
     if (local) {
       data = await readFile(local)
     } else {
-      const res = await fetch(asset.url)
-      if (!res.ok || !res.body) throw new DshModelError('engine_download_failed', L(`下载引擎失败：HTTP ${res.status}`, `Engine download failed: HTTP ${res.status}`), asset.url)
-      await pipeline(Readable.fromWeb(res.body as import('node:stream/web').ReadableStream), createWriteStream(archive, { mode: 0o600 }))
-      data = await readFile(archive)
+      data = await download(asset.url, proxy, L('引擎', ' the engine'))
+      const { writeFile } = await import('node:fs/promises')
+      await writeFile(archive, data, { mode: 0o600 })
     }
     const actual = sha256(data)
     if (actual !== asset.sha256) {

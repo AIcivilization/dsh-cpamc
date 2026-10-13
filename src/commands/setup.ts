@@ -152,18 +152,18 @@ export async function ensureEngine(ctx: Ctx, all: All, opts: { port?: number } =
   const manifest = await loadManifest()
   const target = platformTarget()
   const version = config.engine.version ?? manifest.version
-  const asset = version === manifest.version ? manifest.assets[target] : await fetchUpstreamAsset(manifest, version, target)
+  const asset = version === manifest.version ? manifest.assets[target] : await fetchUpstreamAsset(manifest, version, target, config.proxy)
   if (!asset) throw new DshModelError('unsupported_platform', L(`引擎没有 ${target} 的发布包`, `No engine build for ${target}`))
-  const installed = await installVersion(ctx, version, asset)
+  const installed = await installVersion(ctx, version, asset, config.proxy)
   if ((await currentVersion(ctx)) !== version) await activateVersion(ctx, version)
   config.engine.version = version
   if (!state.engine.versions.includes(version)) state.engine.versions.push(version)
   ;(installed ? ok : skip)(L(`引擎 v${version}${installed ? ' 已下载并校验' : ' 已安装'}`, `Engine v${version} ${installed ? 'downloaded and verified' : 'already installed'}`))
 
   // 渠道插件包（四个 IDE 来源）与完整管理界面：和引擎一样锁版本、校验 sha256
-  const pluginsNew = await installPlugins(ctx, manifest.plugins)
+  const pluginsNew = await installPlugins(ctx, manifest.plugins, config.proxy)
   ;(pluginsNew ? ok : skip)(L(`渠道插件包 v${manifest.plugins.version}（WorkBuddy、Trae、Qoder、ZCode）${pluginsNew ? '已下载并校验' : '已安装'}`, `Channel plugins v${manifest.plugins.version} (WorkBuddy, Trae, Qoder, ZCode) ${pluginsNew ? 'downloaded and verified' : 'already installed'}`))
-  const panelNew = await installPanel(ctx, manifest.panel)
+  const panelNew = await installPanel(ctx, manifest.panel, config.proxy)
   ;(panelNew ? ok : skip)(L(`完整管理界面 v${manifest.panel.version}${panelNew ? ' 已下载并校验' : ' 已安装'}`, `Full management interface v${manifest.panel.version} ${panelNew ? 'downloaded and verified' : 'already installed'}`))
   state.components = { plugins: manifest.plugins.version, panel: manifest.panel.version }
 
