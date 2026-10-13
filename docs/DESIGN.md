@@ -15,6 +15,7 @@
 | 卸载确认端口释放、插件最后移除；从 dsh-model 迁移 | 已完成 |
 | VPS 与远程浏览器：管理界面经 DSH 自己的网页服务提供（§7.4） | 已完成，真实 DSH web profile 实测通过 |
 | 对外 `/v1` 经 DSH 网址提供（`/dsh-cpamc/v1`） | 已完成，真实 DSH 实测（含流式） |
+| 从桌面一键部署到已有 DSH 的服务器（§9.1） | 已完成；接口在真实 DSH 里实测，SSH 部署本身只做了单元测试（没有测试服务器） |
 | 其余平台实测、Windows arm64 | 未开始 |
 | 从 DSH 插件管理器直接移除时的自检兜底（§10.3） | 未开始 |
 
@@ -260,6 +261,16 @@ WorkBuddy bridge 及其系统服务、OpenCode Zen 集成、本机模型（Ollam
 - 写给 DSH 的 `baseURL` 永远是服务器本机地址，不会把 `127.0.0.1` 发给远程浏览器使用，也不会把公网域名写进服务器端配置。
 - 域名或 IP 由 dsh-vps 提供。现在 dsh-model 直接读 `/etc/caddy/dsh-site.conf`，0.1 先沿用。之后改为调用 dsh-vps 的接口（§12 V6），dsh-cpamc 不保存 SSH 或 VPS 登录凭据。
 - 域名或 IP 变化后，重新生成 `:9443` 站点和外部地址。服务器上 DSH 的 provider 地址不受影响。
+
+### 9.1 从桌面一键部署到服务器（R10）
+
+在这台电脑上的 DSH 里，dsh-cpamc 设置页的「部署到服务器」：填服务器地址、SSH 端口、用户名和密码（可留空，用本机的 SSH 密钥），一键把**同一版本**的 dsh-cpamc 装到一台**已经有 DSH** 的服务器上（`plugin/remote-deploy.js`，改写自 dsh-vps 的远程安装，代码拷进本产品，不依赖 dsh-vps）。
+
+- 服务器上执行：检查 root / 免密 sudo、Node 20+ 与 npm、DSH 是否存在 → 后台（`nohup setsid`）执行 `npm install -g dsh-cpamc@<版本> && dsh-cpamc setup`，日志 `/var/log/dsh-cpamc-deploy.log`；SSH 断开也会跑完。可选用国内 npm 镜像；
+- 卸载：`dsh-cpamc uninstall --yes --remove-plugin`（可选先备份登录凭据）；
+- 密码只进这一次 ssh 子进程的环境变量，经 `SSH_ASKPASS` 交给 ssh：不写盘、不进日志、不保存，任务状态里也没有；
+- 接口挂在 DSH 的 `/api/dsh-cpamc.deploy`（`ctx.connection.fetch`），由 DSH 做同源与登录校验（实测未登录 401）；
+- 不负责把 DSH 本身装到空服务器上：服务器上没有 DSH 时明确报错。
 
 ## 10. 安装、更新、卸载
 

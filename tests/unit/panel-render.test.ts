@@ -83,6 +83,7 @@ describe('settings page rendering', () => {
       expect(render(m, 'Onboarding', { code: 'daemon_not_configured', onDone: noop })).toContain(zh ? '一键准备' : 'Prepare now')
       expect(render(m, 'SelfProgress', { job: { action: 'uninstall', from: '0.1.0' }, onDone: noop })).toContain(zh ? '正在卸载' : 'Uninstalling')
       expect(render(m, 'SettingsSection', {})).toContain('dsh-cpamc')
+      expect(render(m, 'DeploySection', {})).toContain(zh ? '部署到服务器' : 'Deploy to a server')
     })
   }
 

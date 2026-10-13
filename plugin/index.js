@@ -13,6 +13,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { registerPanelRoutes } from './panel-proxy.js'
+import { createDeployer, validateRequest as validateDeploy } from './remote-deploy.js'
+import { readFileSync } from 'node:fs'
 
 /** 本包根目录：插件就是完整的 dsh-cpamc 包，自带命令行 */
 const PKG_ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -119,8 +121,53 @@ function runCli(args) {
   return running
 }
 
+const DEPLOY_PATH = '/api/dsh-cpamc.deploy'
+
+function pkgVersion() {
+  try {
+    return JSON.parse(readFileSync(join(PKG_ROOT, 'package.json'), 'utf8')).version
+  } catch {
+    return null
+  }
+}
+
+const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
+
 export function apply(ctx) {
   const token = randomBytes(24).toString('hex')
+
+  // 部署到服务器（设计 §9.1）：挂在 dsh 的 /api 通道，dsh 自己做同源与登录校验。没有 connection.fetch 的旧版 dsh 不注册
+  ctx.inject(['connection'], (connCtx) => {
+    const fetchApi = connCtx.connection?.fetch
+    const version = pkgVersion()
+    if (!fetchApi || typeof fetchApi.register !== 'function' || !version) return
+    const deployer = createDeployer({ version })
+    connCtx.effect?.(() => () => deployer.dispose(), 'dsh-cpamc: deployer')
+    try {
+      fetchApi.register({
+        path: DEPLOY_PATH,
+        methods: ['GET', 'POST'],
+        requestBody: 'buffered',
+        fetch: async (request) => {
+          if (request.method === 'GET') return jsonResponse({ ...deployer.snapshot(), version })
+          let body
+          try {
+            body = await request.json()
+          } catch {
+            return jsonResponse({ error: 'bad request' }, 400)
+          }
+          const lang = body?.lang === 'en' ? 'en' : 'zh'
+          const checked = validateDeploy(body, lang)
+          if (checked.error) return jsonResponse({ error: checked.error }, 400)
+          const result = await deployer.start(checked.value, lang)
+          if (result.error) return jsonResponse({ error: result.error }, result.status || 400)
+          return jsonResponse(result, 202)
+        },
+      })
+    } catch (error) {
+      console.warn('[dsh-cpamc] deploy route not registered', error)
+    }
+  })
 
   // 原版完整管理界面经 dsh 自己的网页服务提供，先过 dsh 的登录校验（panel-proxy.js）。
   // 单独一个 inject：这个 dsh 版本没有 connection 服务时，下面的设置页照常可用

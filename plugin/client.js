@@ -498,6 +498,75 @@ window.__ModuleLoader__.load({
             msg ? h('span', { style: S.meta }, msg) : null)))
     }
 
+    // —— 部署到服务器（设计 §9.1）：在这台电脑上的 dsh 里填表，经 SSH 把 dsh-cpamc 装到已经有 DSH 的服务器 ——
+    const DEPLOY_API = '/api/dsh-cpamc.deploy'
+    async function deployApi(method, body) {
+      const r = await fetch(DEPLOY_API, { method, credentials: 'same-origin', cache: 'no-store', headers: body ? { 'content-type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined })
+      if (r.status === 404) return { unavailable: true }
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`)
+      return j
+    }
+
+    function DeploySection() {
+      const [open, setOpen] = useState(false)
+      const [form, setForm] = useState({ host: '', port: '22', user: 'root', password: '', mirror: true })
+      const [job, setJob] = useState(null)
+      const [version, setVersion] = useState('')
+      const [unavailable, setUnavailable] = useState(false)
+      const [err, setErr] = useState('')
+      const [busy, setBusy] = useState(false)
+      const poll = useRef(null)
+      const refresh = useCallback(async () => {
+        try {
+          const r = await deployApi('GET')
+          if (r.unavailable) { setUnavailable(true); return }
+          setVersion(r.version || '')
+          setJob(r.job)
+          if (r.job?.state === 'running') { clearTimeout(poll.current); poll.current = setTimeout(refresh, 2000) }
+        } catch (e) { setErr(e.message) }
+      }, [])
+      useEffect(() => { if (open) void refresh(); return () => clearTimeout(poll.current) }, [open, refresh])
+      const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }))
+      const start = async (action) => {
+        if (action === 'uninstall' && !window.confirm(L(`从 ${form.host} 卸载 dsh-cpamc？服务器上的模型服务会停止，那台 DSH 里的 dsh-cpamc 模型会消失。`, `Uninstall dsh-cpamc from ${form.host}? Its model service stops and the dsh-cpamc models disappear from that DSH.`))) return
+        setErr(''); setBusy(true)
+        try {
+          const r = await deployApi('POST', { action, host: form.host.trim(), port: Number(form.port) || 22, user: form.user.trim() || 'root', password: form.password, mirror: form.mirror, lang: isZh() ? 'zh' : 'en' })
+          setForm((f) => ({ ...f, password: '' }))
+          setJob(r.job)
+          clearTimeout(poll.current); poll.current = setTimeout(refresh, 2000)
+        } catch (e) { setErr(e.message) } finally { setBusy(false) }
+      }
+      const running = job?.state === 'running'
+      const field = (label, key, extra = {}) => h('label', { style: { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: C.sub, minWidth: 0, flex: extra.flex || 1 } }, label,
+        h('input', { style: S.input, value: form[key], onChange: set(key), disabled: running, ...extra.input }))
+      return h('div', { style: S.section },
+        h('div', { style: S.line },
+          h('div', { style: { ...S.h, ...S.grow, margin: 0 } }, L('部署到服务器', 'Deploy to a server')),
+          h('button', { type: 'button', style: S.btn, onClick: () => setOpen(!open) }, open ? L('收起', 'Hide') : L('展开', 'Show'))),
+        h('p', { style: S.note }, L('把 dsh-cpamc 装到一台已经装好 DSH 的服务器上（同一个版本），之后在浏览器里打开那台 DSH → 设置 → dsh-cpamc 管理。密码只用于这一次连接，不保存；不填就用这台电脑上的 SSH 密钥。',
+          'Install dsh-cpamc (this same version) on a server that already runs DSH, then manage it from that DSH → Settings → dsh-cpamc in a browser. The password is used for this connection only and never stored; leave it empty to use this computer\'s SSH key.')),
+        open ? (unavailable ? h('div', { style: S.meta }, L('这个版本的 DSH 不支持从页面部署。可以在服务器上执行：npm install -g dsh-cpamc && sudo dsh-cpamc setup', 'This DSH version cannot deploy from the page. On the server run: npm install -g dsh-cpamc && sudo dsh-cpamc setup')) : h('div', { style: { ...S.card, padding: '12px 14px' } },
+          h('div', { style: { ...S.line, alignItems: 'flex-end' } },
+            field(L('服务器地址', 'Server address'), 'host', { flex: 3, input: { placeholder: L('公网 IP 或域名', 'Public IP or domain') } }),
+            field(L('SSH 端口', 'SSH port'), 'port', { flex: 1 }),
+            field(L('用户名', 'User'), 'user', { flex: 1 }),
+            field(L('密码（可留空）', 'Password (optional)'), 'password', { flex: 2, input: { type: 'password', autoComplete: 'off' } })),
+          h('label', { style: { ...S.line, fontSize: 12, color: C.sub, marginTop: 6, cursor: 'pointer' } },
+            h('input', { type: 'checkbox', checked: form.mirror, onChange: set('mirror'), disabled: running }), L('服务器在国内：用国内镜像下载 dsh-cpamc', 'Server in mainland China: download dsh-cpamc from the China mirror')),
+          h('div', { style: { ...S.line, marginTop: 8 } },
+            h('button', { type: 'button', style: S.btnPrimary, disabled: busy || running || !form.host.trim(), onClick: () => void start('install') }, running && job.action === 'install' ? L('部署中…', 'Deploying…') : L(`部署 v${version || '?'} 到这台服务器`, `Deploy v${version || '?'} to this server`)),
+            h('button', { type: 'button', style: { ...S.btn, color: C.err }, disabled: busy || running || !form.host.trim(), onClick: () => void start('uninstall') }, L('从这台服务器卸载', 'Uninstall from this server'))),
+          err ? h('div', { style: { fontSize: 12, color: C.err, marginTop: 6 } }, err) : null,
+          job ? h('div', { style: { marginTop: 10 } },
+            h('div', { style: { fontSize: 12, color: job.state === 'success' ? C.ok : job.state === 'failed' ? C.err : C.sub, marginBottom: 6 } },
+              job.state === 'running' ? (job.phase === 'connecting' ? L(`正在连接 ${job.host}…`, `Connecting to ${job.host}…`) : L('服务器上正在执行（可以关掉这一页，任务会在服务器上继续）…', 'Running on the server (you can close this page; it keeps running there)…'))
+                : job.state === 'success' ? (job.action === 'install' ? L(`完成：在浏览器里打开 ${job.host} 上的 DSH → 设置 → dsh-cpamc。服务器上的 DSH 要重启一次才会出现这一页。`, `Done: open the DSH on ${job.host} → Settings → dsh-cpamc. Restart that DSH once for the page to appear.`) : L('已从服务器卸载', 'Uninstalled from the server'))
+                  : job.error),
+            job.lines?.length ? h('pre', { style: { ...S.mono, ...S.card, padding: 10, maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 } }, job.lines.join('\n')) : null) : null)) : null)
+    }
+
     // —— 「全部功能」卡片（R4）——
     const PANEL_PREFIX = '/dsh-cpamc/panel'
     function FullFeaturesCard({ openRef }) {
@@ -662,6 +731,7 @@ window.__ModuleLoader__.load({
         h(ModelsSection, { key: 'models', sources: data.sources, stats: data.stats, reload: () => load(false), openPanel: () => openPanel.current?.() }),
         h(KeysSection, { key: 'keys', info: data.keys, endpoints: data.endpoints, reload: () => load(false) }),
         h(ServiceSection, { key: 'service', service: data.service, reload: load }),
+        isLoopbackPage() ? h(DeploySection, { key: 'deploy' }) : null,
         h(FullFeaturesCard, { key: 'full', openRef: openPanel }),
       ])
     }
@@ -678,7 +748,7 @@ window.__ModuleLoader__.load({
       }
     }
 
-    module.exports = { name, inject, apply, __test: { until, pct, ms, statusOf, newer, Header, ModelsSection, KeysSection, ServiceSection, FullFeaturesCard, Onboarding, SelfProgress, SettingsSection } }
+    module.exports = { name, inject, apply, __test: { until, pct, ms, statusOf, newer, Header, ModelsSection, KeysSection, ServiceSection, FullFeaturesCard, Onboarding, SelfProgress, SettingsSection, DeploySection } }
     return module.exports
   },
 })
