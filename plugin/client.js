@@ -466,21 +466,15 @@ window.__ModuleLoader__.load({
     function ServiceSection({ service, reload }) {
       const [busy, setBusy] = useState('')
       const [msg, setMsg] = useState('')
+      // Hook 必须在提前返回之前调用（每次渲染数量一致）
+      const repairJob = useSetupJob(() => void reload(true))
       if (!service) return null
       const e = service.engine
       const restart = async () => {
         setBusy('restart'); setMsg('')
         try { const r = await api('POST', '/service/restart'); setMsg(r.running ? L('已重启', 'Restarted') : L('重启后没有起来，查看日志：dsh-cpamc logs', 'Did not come back after restart; check: dsh-cpamc logs')); await reload(true) } catch (x) { setMsg(x.message) } finally { setBusy('') }
       }
-      const repair = async () => {
-        setBusy('repair'); setMsg('')
-        try {
-          const r = await fetch('/api-dsh-cpamc/setup', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-dsh-cpamc-token': token }, body: JSON.stringify({ action: 'repair', lang: isZh() ? 'zh' : 'en' }) })
-          const j = await r.json().catch(() => ({}))
-          setMsg(j.vps ? L('服务器上请在终端执行：sudo dsh-cpamc repair', 'On the server run: sudo dsh-cpamc repair') : j.code === 0 ? L('修复完成', 'Repaired') : L(`修复没有完成（退出码 ${j.code}）`, `Repair did not finish (exit code ${j.code})`))
-          await reload(true)
-        } catch (x) { setMsg(x.message) } finally { setBusy('') }
-      }
+      const repair = () => { setMsg(''); void repairJob.start('repair') }
       const row = (label, value, color) => h('div', { style: { ...S.line, minHeight: 26 } }, h('span', { style: { ...S.meta, width: 110, flex: 'none' } }, label), h('span', { style: { fontSize: 13, color: color || C.text } }, value))
       return h('div', { style: S.section },
         h('div', { style: S.h }, L('服务', 'Service')),
@@ -494,8 +488,10 @@ window.__ModuleLoader__.load({
           h('div', { style: { ...S.line, marginTop: 8 } },
             h('button', { type: 'button', style: S.btn, disabled: Boolean(busy), onClick: () => void reload(true) }, L('重新检查', 'Check again')),
             service.canRestart ? h('button', { type: 'button', style: S.btn, disabled: Boolean(busy), onClick: restart }, busy === 'restart' ? L('重启中…', 'Restarting…') : L('重启服务', 'Restart service')) : null,
-            h('button', { type: 'button', style: S.btn, disabled: Boolean(busy), onClick: repair }, busy === 'repair' ? L('修复中…', 'Repairing…') : L('修复', 'Repair')),
-            msg ? h('span', { style: S.meta }, msg) : null)))
+            h('button', { type: 'button', style: S.btn, disabled: Boolean(busy) || repairJob.running, onClick: repair }, repairJob.running ? L('修复中…', 'Repairing…') : L('修复', 'Repair')),
+            msg ? h('span', { style: S.meta }, msg) : null),
+          repairJob.vps ? h('div', { style: { ...S.meta, marginTop: 6 } }, L('服务器上请在终端执行：sudo dsh-cpamc repair', 'On the server run: sudo dsh-cpamc repair')) : null,
+          repairJob.job?.action === 'repair' || repairJob.err ? h(JobLog, { job: repairJob.job, err: repairJob.err }) : null))
     }
 
     // —— 部署到服务器（设计 §9.1）：在这台电脑上的 dsh 里填表，经 SSH 把 dsh-cpamc 装到已经有 DSH 的服务器 ——
@@ -609,27 +605,79 @@ window.__ModuleLoader__.load({
           err ? h('div', { style: { fontSize: 12, color: C.err, marginTop: 6 } }, err) : null))
     }
 
-    /** 守护进程还没装 / 没在运行：说明 + 一键安装（本机）或命令（VPS 上要 root） */
-    function Onboarding({ code, onDone }) {
-      const [busy, setBusy] = useState(false)
-      const [res, setRes] = useState(null)
-      const notInstalled = code === 'daemon_not_configured'
-      const action = notInstalled ? 'setup' : 'repair'
-      const run = async () => {
-        setBusy(true)
-        setRes(null)
+    // —— 一键准备 / 修复：后台任务，轮询进度（宿主端 /api-dsh-cpamc/setup）——
+    async function setupCall(body) {
+      const once = () => fetch('/api-dsh-cpamc/setup', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-dsh-cpamc-token': token }, body: JSON.stringify({ ...body, lang: isZh() ? 'zh' : 'en' }) })
+      let r = await once()
+      let j = await r.json().catch(() => ({}))
+      if (r.status === 403 && j?.error?.code === 'refused') {
+        await refreshToken()
+        r = await once()
+        j = await r.json().catch(() => ({}))
+      }
+      if (!r.ok) throw new Error(j?.error?.message || `HTTP ${r.status}`)
+      return j
+    }
+
+    /** 跑 setup / repair 并跟进度：start(action)；job 为当前任务（state: running / success / failed） */
+    function useSetupJob(onSuccess) {
+      const [job, setJob] = useState(null)
+      const [vps, setVps] = useState(false)
+      const [err, setErr] = useState('')
+      const timer = useRef(null)
+      const misses = useRef(0)
+      const poll = useCallback(async () => {
+        clearTimeout(timer.current)
         try {
-          const r = await fetch('/api-dsh-cpamc/setup', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-dsh-cpamc-token': token }, body: JSON.stringify({ action, lang: isZh() ? 'zh' : 'en' }) })
-          const j = await r.json().catch(() => ({}))
-          if (r.status === 403 && j?.error?.code === 'refused') { await refreshToken(); setBusy(false); return run() }
-          setRes(j)
-          if (j.code === 0) setTimeout(onDone, 1500)
+          const r = await setupCall({ action: 'status' })
+          misses.current = 0
+          setJob(r.job)
+          if (r.job?.state === 'running') timer.current = setTimeout(poll, 1500)
+          else if (r.job?.state === 'success') onSuccess?.()
         } catch (e) {
-          setRes({ code: -1, output: e.message })
-        } finally {
-          setBusy(false)
+          // dsh 重启、网络抖一下：多试几次再报错
+          if (++misses.current < 8) timer.current = setTimeout(poll, 3000)
+          else setErr(L(`查不到进度：${e.message}`, `Cannot read progress: ${e.message}`))
+        }
+      }, [])
+      useEffect(() => { void poll(); return () => clearTimeout(timer.current) }, [poll])
+      const start = async (action) => {
+        setErr('')
+        try {
+          const r = await setupCall({ action })
+          if (r.vps) { setVps(true); return }
+          setJob(r.job)
+          clearTimeout(timer.current)
+          timer.current = setTimeout(poll, 1500)
+        } catch (e) {
+          setErr(e.message)
         }
       }
+      return { job, vps, err, start, running: job?.state === 'running' }
+    }
+
+    function JobLog({ job, err }) {
+      const ref = useRef(null)
+      useEffect(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight })
+      if (!job && !err) return null
+      const secs = job ? Math.round(((job.endedAt || Date.now()) - job.startedAt) / 1000) : 0
+      const head = err ? err
+        : job.state === 'running' ? L(`进行中… 已用 ${secs} 秒（下载经代理时可能要几分钟，可以离开这一页，回来还能看到进度）`, `Running… ${secs}s so far (downloads through a proxy can take minutes; you can leave and come back)`)
+          : job.state === 'success' ? L('完成，正在加载…', 'Done, loading…')
+            : L(`没有完成（退出码 ${job.code}），输出如下：`, `Did not finish (exit code ${job.code}); output:`)
+      return h('div', { style: { marginTop: 12 } },
+        h('div', { style: { fontSize: 12, color: err || job?.state === 'failed' ? C.err : job?.state === 'success' ? C.ok : C.sub, marginBottom: 6 } }, head),
+        job?.output ? h('pre', { ref, style: { ...S.mono, ...S.card, padding: 10, maxHeight: 280, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 } }, job.output) : null)
+    }
+
+    /** 守护进程还没装 / 没在运行：说明 + 一键安装（本机）或命令（VPS 上要 root） */
+    function Onboarding({ code, onDone }) {
+      const notInstalled = code === 'daemon_not_configured'
+      const action = notInstalled ? 'setup' : 'repair'
+      const { job, vps, err, start, running } = useSetupJob(() => setTimeout(onDone, 1500))
+      const busy = running
+      const run = () => void start(action)
+      const res = vps ? { vps: true } : null
       const cmds = notInstalled ? ['npm install -g dsh-cpamc', 'dsh-cpamc setup'] : ['dsh-cpamc repair']
       const vpsCmds = notInstalled ? ['sudo npm install -g dsh-cpamc', 'sudo dsh-cpamc setup'] : ['sudo dsh-cpamc repair']
       const cmdBlock = (list) => h('div', { style: { ...S.card, padding: '8px 12px', marginTop: 8 } }, list.map((c) => h('div', { key: c, style: { ...S.line, minHeight: 30 } }, h('code', { style: { ...S.mono, ...S.grow } }, c), h(CopyButton, { get: c }))))
@@ -647,9 +695,7 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', style: S.btn, onClick: onDone }, L('重新检测', 'Check again'))),
           h('p', { style: { ...S.note, marginTop: 10 } }, L('也可以在终端里执行：', 'Or run in a terminal:')),
           cmdBlock(cmds)),
-        res && !res.vps ? h('div', { style: { marginTop: 12 } },
-          h('div', { style: { fontSize: 12, color: res.code === 0 ? C.ok : C.err, marginBottom: 6 } }, res.code === 0 ? L('完成，正在加载…', 'Done, loading…') : L(`没有完成（退出码 ${res.code}），输出如下：`, `Did not finish (exit code ${res.code}); output:`)),
-          h('pre', { style: { ...S.mono, ...S.card, padding: 10, maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 } }, res.output || '')) : null)
+        !vps ? h(JobLog, { job, err }) : null)
     }
 
     /** 更新 / 卸载进行中：守护进程会重启或消失，期间不显示别的 */

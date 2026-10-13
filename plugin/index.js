@@ -99,26 +99,55 @@ function check(req, token, needToken = true) {
 
 const exists = (p) => access(p).then(() => true, () => false)
 
-/** 从页面一键执行 setup / repair（只在本机模式：VPS 上要 root，页面只给命令）。同一时间只跑一个 */
-let running = null
-function runCli(args) {
-  if (running) return running
-  running = new Promise((resolve) => {
-    let out = ''
-    const child = spawn(process.execPath, [join(PKG_ROOT, 'bin/dsh-cpamc.js'), ...args], {
+/**
+ * 从页面一键执行 setup / repair（只在本机模式：VPS 上要 root，页面只给命令）。
+ * 后台任务：POST 立刻返回，页面轮询进度（{ action: 'status' }）。下载经代理时要好几分钟，
+ * 一个挂着不回的请求会被中途断开，页面就什么都看不到（Windows 实测「准备中…」之后毫无反应）。
+ * 同一时间只跑一个；结束后结果保留到下一次开始。
+ */
+let job = null
+const JOB_TIMEOUT_MS = 20 * 60 * 1000
+const strip = (t) => t.replace(/\x1b\[[0-9;]*m/g, '').replace(/\r(?!\n)/g, '\n')
+
+function jobView() {
+  if (!job) return { job: null }
+  const { child, timer, ...rest } = job
+  return { job: { ...rest, output: rest.output.slice(-20000) } }
+}
+
+function startCli(action, args) {
+  if (job && job.state === 'running') return jobView()
+  job = { action, state: 'running', startedAt: Date.now(), endedAt: null, code: null, output: '' }
+  const current = job
+  let child
+  try {
+    child = spawn(process.execPath, [join(PKG_ROOT, 'bin/dsh-cpamc.js'), ...args], {
       windowsHide: true,
-      // dsh 桌面版可能跑在 Electron 里：让它当普通 Node 用
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NO_COLOR: '1', FORCE_COLOR: '0' },
+      // dsh 桌面版跑在 Electron 里：让它当普通 Node 用
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NO_COLOR: '1', FORCE_COLOR: '0', DSH_CPAMC_PROGRESS: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
-    const add = (b) => { out = (out + b.toString()).slice(-20000) }
-    child.stdout.on('data', add)
-    child.stderr.on('data', add)
-    const timer = setTimeout(() => child.kill('SIGTERM'), 10 * 60 * 1000)
-    child.on('error', (e) => { clearTimeout(timer); resolve({ code: -1, output: `${out}\n${e.message}` }) })
-    child.on('exit', (code) => { clearTimeout(timer); resolve({ code: code ?? -1, output: out.replace(/\x1b\[[0-9;]*m/g, '') }) })
-  }).finally(() => { running = null })
-  return running
+  } catch (e) {
+    Object.assign(current, { state: 'failed', code: -1, endedAt: Date.now(), output: `could not start: ${e.message}` })
+    return jobView()
+  }
+  current.child = child
+  const add = (b) => { current.output = (current.output + strip(b.toString())).slice(-60000) }
+  child.stdout.on('data', add)
+  child.stderr.on('data', add)
+  current.timer = setTimeout(() => {
+    add('\n[dsh-cpamc] timed out after 20 minutes; stopped\n')
+    child.kill('SIGTERM')
+  }, JOB_TIMEOUT_MS)
+  const done = (code, extra) => {
+    if (current.endedAt) return
+    clearTimeout(current.timer)
+    if (extra) add(`\n${extra}\n`)
+    Object.assign(current, { state: code === 0 ? 'success' : 'failed', code: code ?? -1, endedAt: Date.now() })
+  }
+  child.on('error', (e) => done(-1, e.message))
+  child.on('exit', (code) => done(code))
+  return jobView()
 }
 
 const DEPLOY_PATH = '/api/dsh-cpamc.deploy'
@@ -257,11 +286,11 @@ export function apply(ctx) {
           } catch {
             return json(res, 400, { error: { code: 'invalid_json', message: 'invalid JSON' } })
           }
+          if (body.action === 'status') return json(res, 200, jobView())
           if (await exists(VPS_ROOT)) return json(res, 200, { vps: true })
           const action = body.action === 'repair' ? 'repair' : 'setup'
           const lang = body.lang === 'en' ? 'en' : 'zh'
-          const r = await runCli(action === 'repair' ? ['repair', '--lang', lang] : ['setup', '--skip-dsh-plugin', '--lang', lang])
-          return json(res, 200, r)
+          return json(res, 202, startCli(action, action === 'repair' ? ['repair', '--lang', lang] : ['setup', '--skip-dsh-plugin', '--lang', lang]))
         },
       }),
     )
