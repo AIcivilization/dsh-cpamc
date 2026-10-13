@@ -730,10 +730,10 @@ export class Daemon {
   }
 
   /**
-   * 「全部功能」：确保引擎在跑，返回原版管理界面的地址（设计 §5.4、§7）。
-   * 本机：http://127.0.0.1:<端口>/management.html。VPS：经 dsh-vps 的登录门（/cpamc/）；登录门还不支持时给出 SSH 隧道的办法。
+   * 「全部功能」：确保引擎在跑，返回本机地址（设计 §5.4、§7）。
+   * 远程浏览器用不了 127.0.0.1：页面会改用 dsh 自己网页服务下的 /dsh-cpamc/panel/（插件宿主端提供，先过 dsh 登录）。
    */
-  async panelOpen(): Promise<{ url?: string; apiBase?: string; vps: boolean; tunnel?: string; running: boolean }> {
+  async panelOpen(): Promise<{ url: string; apiBase: string; running: boolean }> {
     const all = await loadAll(this.ctx)
     let running = await healthy(all.config.port)
     if (!running && this.ctx.mode !== 'vps' && !this.ctx.serviceDisabled) {
@@ -741,11 +741,7 @@ export class Daemon {
       running = await waitHealthy(all.config.port, 15_000)
     }
     const local = `http://127.0.0.1:${all.config.port}`
-    if (this.ctx.mode !== 'vps') return { url: `${local}/management.html`, apiBase: local, vps: false, running }
-    const gate = all.state.gateRoute
-    if (gate?.origin) return { url: `${gate.origin}${gate.prefix}/management.html`, apiBase: `${gate.origin}${gate.prefix}`, vps: true, running }
-    const host = all.config.remote.domain ?? L('<服务器地址>', '<server>')
-    return { vps: true, running, tunnel: `ssh -N -L ${all.config.port}:127.0.0.1:${all.config.port} root@${host}`, apiBase: local, url: `${local}/management.html` }
+    return { url: `${local}/management.html`, apiBase: local, running }
   }
 
   /** 原版管理界面的登录密钥（只经同源、带页面 token、过了 dsh 登录的插件路由；设计 §7.3） */

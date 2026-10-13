@@ -12,6 +12,7 @@ import { access, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { registerPanelRoutes } from './panel-proxy.js'
 
 /** 本包根目录：插件就是完整的 dsh-cpamc 包，自带命令行 */
 const PKG_ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -120,6 +121,34 @@ function runCli(args) {
 
 export function apply(ctx) {
   const token = randomBytes(24).toString('hex')
+
+  // 原版完整管理界面经 dsh 自己的网页服务提供，先过 dsh 的登录校验（panel-proxy.js）。
+  // 单独一个 inject：这个 dsh 版本没有 connection 服务时，下面的设置页照常可用
+  ctx.inject(['webServer', 'connection'], (panelCtx) => {
+    const ws = panelCtx.webServer
+    const connection = panelCtx.connection
+    if (!ws || typeof ws.register !== 'function' || !connection || typeof connection.admit !== 'function') return
+    let disposers = []
+    try {
+      disposers = registerPanelRoutes(ws, connection, home, (m) => console.warn(m)).disposers
+    } catch (error) {
+      console.warn('[dsh-cpamc] management interface routes not registered', error)
+    }
+    try {
+      panelCtx.effect?.(() => () => {
+        for (const d of disposers.reverse()) {
+          try {
+            d?.()
+          } catch {
+            // 反注册失败不影响卸载
+          }
+        }
+      }, 'dsh-cpamc: management interface routes')
+    } catch {
+      // 宿主不支持就算了
+    }
+  })
+
   ctx.inject(['webServer'], (webCtx) => {
     const ws = webCtx.webServer
     if (!ws || typeof ws.register !== 'function') return

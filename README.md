@@ -22,7 +22,7 @@ dsh-cpamc 在 [dsh-model](https://github.com/AIcivilization/dsh-model) 的基础
 | 模型管理 | 最近使用的模型；六个来源的状态、账号、显示 / 隐藏开关；最近 24 小时的真实请求数、成功率、延迟和速度（没有数据时写「暂无请求数据」）；选择在 DSH 里显示哪些模型 | 已实现 |
 | API Key | 本机地址与外部地址；每台设备一把 key，新增、复制、轮换、吊销 | 已实现 |
 | 服务 | 模型服务、渠道组件、完整管理界面的版本与运行状态；重新检查、重启、修复 | 已实现 |
-| 全部功能 | 确认服务在运行后，打开原版完整管理界面；复制登录密钥（不显示，30 秒后从剪贴板清除） | 本机已实现；VPS 计划中 |
+| 全部功能 | 确认服务在运行后，打开原版完整管理界面；复制登录密钥（不显示，30 秒后从剪贴板清除）。远程浏览器经 DSH 自己的网址打开，先要登录 DSH | 已实现 |
 
 界面语言跟随 DSH。
 
@@ -59,7 +59,7 @@ node bin/dsh-cpamc.js setup
 | macOS Apple 芯片 | 已用真实组件测试 |
 | macOS Intel、Linux x64 / arm64、Windows x64 | 组件已齐，待逐个实测 |
 | Windows arm64 | 渠道组件暂无该平台版本，验证中 |
-| VPS（配合 [dsh-vps](https://github.com/AIcivilization/dsh-vps)） | 计划中：完整管理界面放在 dsh-vps 的登录保护之后，和 DSH 使用同一个网址 |
+| 服务器（VPS） | 完整管理界面经 DSH 自己的网址提供、先过 DSH 登录，已实测；不需要另装其他产品 |
 
 ## 安全与卸载
 
@@ -96,7 +96,7 @@ Built on [dsh-model](https://github.com/AIcivilization/dsh-model):
 - **A short model list**: every source can be shown or hidden in DSH. By default only models from free sources that were actually tested on your account are shown, two at most.
 - **All features one click away**: sign-ins, full configuration, routing and detailed logs live in the original full management interface, which manages the very service that serves DSH. Settings you change there are not overwritten by dsh-cpamc.
 
-**Settings → dsh-cpamc**: a header (name, version, Update only when a newer version exists, Uninstall), Models (last used model, the six sources with status, show / hide switch and real 24-hour request stats), API keys, Service, and an **All features** card. The panel follows DSH's language. VPS support together with [dsh-vps](https://github.com/AIcivilization/dsh-vps) is planned.
+**Settings → dsh-cpamc**: a header (name, version, Update only when a newer version exists, Uninstall), Models (last used model, the six sources with status, show / hide switch and real 24-hour request stats), API keys, Service, and an **All features** card. The panel follows DSH's language. On a server, the full management interface is served through DSH's own address behind DSH sign-in; no other product is required.
 
 Uninstall removes remote access, restores DSH config, stops and removes the services, confirms the ports are free and only then removes the plugin from DSH; if any step fails it stops and can be retried.
 

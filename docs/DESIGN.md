@@ -13,7 +13,8 @@
 | 设置页：页眉、模型管理、API Key、服务、「全部功能」（本机） | 已完成，渲染测试与浏览器预览通过；尚未在真实 DSH 里装过 |
 | 默认显示实测调通的免费模型（§4.2） | 已完成；需要真实账号验证 |
 | 卸载确认端口释放、插件最后移除；从 dsh-model 迁移 | 已完成 |
-| VPS：gate 的 `/cpamc/` 入口（§7.4） | 未开始，需要 dsh-vps 改动；目前给出 SSH 隧道办法 |
+| VPS 与远程浏览器：管理界面经 DSH 自己的网页服务提供（§7.4） | 已完成，真实 DSH web profile 实测通过 |
+| 对外 `/v1` 不依赖服务器上已有的 Caddy | 未开始（§14 Q4） |
 | 其余平台实测、Windows arm64 | 未开始 |
 | 从 DSH 插件管理器直接移除时的自检兜底（§10.3） | 未开始 |
 
@@ -214,16 +215,22 @@ WorkBuddy bridge 及其系统服务、OpenCode Zen 集成、本机模型（Ollam
 
 这意味着管理密钥会到达用户手里，这是使用原版 CPAMC 的前提。面板本身仍然不接触管理密钥。
 
-### 7.4 VPS
+### 7.4 VPS 与远程浏览器
 
-经反向代理过来的请求，在 CPA 看来来自本机，`allow-remote: false` 起不到保护作用，所以 CPAMC 必须放在登录门后面。dsh-vps 已有现成的登录门，直接复用：
+原则：**dsh-cpamc 自己完成，不依赖、也不修改 dsh-vps 或任何别的产品**。用户不一定装了别的产品；需要别的产品里已有的能力时，把代码拷进来。
 
-- **现状**（dsh-vps `gate/server.js`）：Caddy 把 DSH 站点的全部请求转给 dsh-gate（127.0.0.1:3100）。gate 负责登录（scrypt 口令、HMAC 会话 Cookie、登录限流、`X-Forwarded-For` 由 Caddy 覆盖防伪造），对未登录的请求一律拒绝或跳转登录，然后透明代理到 DSH（3080）。gate 已经按路径分流过自己的页面（`/login`、`/gate/*`、`/setup`），也对插件市场路径做了同源校验。
-- **做法**：在 gate 里给 CPAMC 加一个路径前缀（例如 `/cpamc/`），**先过 gate 登录**，再去掉前缀转发到 `127.0.0.1:<CPA 端口>`。CPAMC 打开地址就是 `https://<dsh 的域名或 IP>/cpamc/management.html`，和 DSH 同源，复用同一个登录态。Caddy 和证书都不用改，也不用新开端口。
-- 写请求沿用 gate 对插件市场的同源校验，防跨站请求。
-- 前缀和上游端口由 dsh-cpamc 通过一个**小接口**登记给 gate（例如 gate 读取 `state/routes.d/dsh-cpamc.json`，dsh-cpamc 卸载时删除该文件）。gate 只接受指向 `127.0.0.1` 的上游，不接受任意地址。这是 dsh-vps 侧的一处小改动（§12 V6）。
-- 不走 DSH 插件宿主路由：DSH 插件路由只支持 GET、HEAD、POST，而 CPAMC 的管理接口要用 PUT、PATCH、DELETE。
-- 对外的 `:9443` 站点（dsh-model 现有）只转发 `/v1/*`，只认模型 API key，不暴露任何管理路径。
+远程浏览器打不开服务器上的 `127.0.0.1`。经反向代理过来的请求在 CPA 看来又来自本机，`allow-remote: false` 起不到保护作用。所以完整管理界面**经 DSH 自己的网页服务提供**（`plugin/panel-proxy.js`）：
+
+- `/dsh-cpamc/panel/management.html`：锁定版本的管理界面；`/dsh-cpamc/panel/<路径>`：去掉前缀，转给本机 CPA；
+- `/v0/management/*`、`/v0/resource/*`、`/v8/management/*`：原样转给本机 CPA。管理界面默认连接的就是页面所在的域名，所以登录页**不用改地址**。这几个前缀如果和别的插件冲突、注册失败，就退回用带前缀的自定义地址；
+- 每个请求先过 DSH 自己的登录校验：`ctx.connection.admit(request)`，这是 DSH 公开的接口，DSH 的 `/api` 用的也是它，负责信任围栏和认证。写请求还要求同源。DSH 的登录 Cookie 不转给 CPA，CPA 的 Set-Cookie 也不回传给浏览器；
+- 管理接口照样要管理密钥。这里多加的一层是 DSH 登录；
+- DSH 前面是 dsh-vps 的 gate、别的反向代理还是直连，都一样能用，也不用新开端口，域名、IP、NAT 的差异都由 DSH 自己的网址承担；
+- 面板上的「全部功能」：页面地址是回环（本机）时直接打开 `http://127.0.0.1:<端口>/management.html`；否则打开 `<DSH 网址>/dsh-cpamc/panel/management.html`。
+
+实测（2026-10-13，DSH 0.2.0-rc.2 的 web profile，隔离目录）：没登录 DSH 时全部返回 401；登录后页面、`/v0`、`/v8` 都正确转发，Cookie 没有转过去；跨站 DELETE 被拒；真实管理界面用默认地址就能登录，四个渠道的账号页都能打开。
+
+对外的 `/v1` 模型地址（其他设备用）目前沿用 dsh-model 的 Caddy `:9443` 做法，它需要服务器上已有 Caddy，还不满足上面的原则，留作待办（§14 Q4）。
 
 ## 8. 平台矩阵（R8）
 
@@ -301,7 +308,7 @@ WorkBuddy bridge 及其系统服务、OpenCode Zen 集成、本机模型（Ollam
 | V3 ✅ | CPAMC 管理页的提供方式、自动更新、能否锁版本 | CPA 配置 `disable-control-panel` 等字段 | 记录偏差（§7.1） |
 | V4 | DSH 有没有卸载钩子；插件更新后是否需要重启 DSH | dsh-model：更新后需要重启 DSH | 用 §10.3 的守护进程自检兜底 |
 | V5 | VPS 上 Claude 和 Codex 在 CPAMC 里能否完成 OAuth（粘贴回调地址） | dsh-model §14.2：管理接口 `oauth/callback` | 面板保留 dsh-model 的登录流程，作为 VPS 上的备用 |
-| V6 ◐ | gate 加 `/cpamc/` 前缀转发（登记文件 + 先登录后转发 + 同源校验）；CPAMC 在带前缀的路径下能否正常工作（页面资源路径、管理接口基地址） | dsh-vps `gate/server.js` 已有登录门和按路径分流；dsh-model 已读 `dsh-site.conf` 取域名 | CPAMC 不认前缀时，改用 gate 的独立子路径，或在登录页里手动填写带前缀的地址 |
+| V6 ✅ | 完整管理界面经 DSH 自己的网页服务提供（先过 `connection.admit`），在真实 DSH 里能登录、能用 | DSH 文档：网页服务是单纯的路由表，认证由 `ctx.connection.admit` 负责 | 引擎前缀注册冲突时，用带前缀的自定义地址 |
 | V7 | Windows arm64：x64 仿真下 CPA 加渠道插件能否运行 | — | 0.1 在该平台标记为不支持，并在下载前提示 |
 | V8 | 同名模型跨渠道轮询的别名表写法 | 参考插件 `model-alias` | — |
 | V9 | 推荐清单里的模型实测：免费、能调通 | dsh-model `pricing` 字段（2026-10 核实） | 推荐清单为空，面板显示空状态 |
@@ -312,7 +319,7 @@ WorkBuddy bridge 及其系统服务、OpenCode Zen 集成、本机模型（Ollam
 |---|---|
 | 0.1 | 从 dsh-model 分出代码，去掉 bridge 和多余来源；接入渠道插件包；完成 §6 的配置归属；面板三部分加页眉；「全部功能」（本机）。平台：macOS、Linux |
 | 0.2 | Windows x64；dsh-model 迁移；卸载自检兜底 |
-| 0.3 | VPS：CPAMC 挂在 dsh-vps 的 gate 登录门后面（含 dsh-vps 侧小改动），外部地址；Windows arm64 结论 |
+| 0.3 | VPS：对外 `/v1` 地址不依赖已有的 Caddy；Windows arm64 结论 |
 
 全平台是产品目标。上表是交付顺序，不是降低范围：每个平台都要有实测记录才算支持。
 
@@ -322,4 +329,5 @@ WorkBuddy bridge 及其系统服务、OpenCode Zen 集成、本机模型（Ollam
 |---|---|---|
 | Q1 | 面板内要不要保留「登录」按钮，作为 CPAMC 之外的快捷入口？ | 0.1 按建议实现：面板只有「在全部功能中登录」；命令行保留 `dsh-cpamc login` 备用。V5 不通过时，VPS 上再加回来 |
 | Q2 | 用户在 CPAMC 里加了六个以外的来源（例如 Gemini），它的模型进不进 DSH？ | 0.1 暂不放进 DSH；建议的「其他来源」折叠分组待实现 |
+| Q4 | 其他设备用的对外 `/v1` 地址：现在沿用 dsh-model 往服务器上已有的 Caddy 里加 `:9443` 站点，等于依赖装过 Caddy | 待定：可以经 DSH 网页服务提供 `/dsh-cpamc/v1`（只认 API key），但 DSH 前面若有要求登录的网关，外部客户端会被挡住 |
 | Q3 | 余额、签到这类渠道功能要不要在面板里做？ | 0.1 只显示 Claude / Codex 的用量；渠道余额待接入，签到等留在 CPAMC |

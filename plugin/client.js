@@ -479,9 +479,8 @@ window.__ModuleLoader__.load({
           row(L('服务版本', 'Service version'), e.version ? `v${e.version}` : '-'),
           row(L('渠道插件', 'Channel plugins'), service.components.plugins ? `v${service.components.plugins}` : '-'),
           row(L('完整管理界面', 'Full interface'), service.components.panel ? `v${service.components.panel}` : '-'),
-          service.mode === 'vps' ? row(L('部署位置', 'Deployed on'), L('dsh-vps 服务器', 'dsh-vps server')) : null,
+          service.mode === 'vps' ? row(L('部署位置', 'Deployed on'), L('服务器', 'Server')) : null,
           service.mode === 'vps' && service.remote.publicUrl ? row(L('外部地址', 'Public address'), service.remote.publicUrl) : null,
-          service.mode === 'vps' ? h('div', { style: { ...S.meta, marginTop: 4 } }, L('服务器账号、密码和域名在「设置 → dsh-vps」里管理。', 'Server account, password and domain are managed under Settings → dsh-vps.')) : null,
           h('div', { style: { ...S.line, marginTop: 8 } },
             h('button', { type: 'button', style: S.btn, disabled: Boolean(busy), onClick: () => void reload(true) }, L('重新检查', 'Check again')),
             service.canRestart ? h('button', { type: 'button', style: S.btn, disabled: Boolean(busy), onClick: restart }, busy === 'restart' ? L('重启中…', 'Restarting…') : L('重启服务', 'Restart service')) : null,
@@ -490,6 +489,7 @@ window.__ModuleLoader__.load({
     }
 
     // —— 「全部功能」卡片（R4）——
+    const PANEL_PREFIX = '/dsh-cpamc/panel'
     function FullFeaturesCard({ openRef }) {
       const [res, setRes] = useState(null)
       const [err, setErr] = useState('')
@@ -498,10 +498,13 @@ window.__ModuleLoader__.load({
         setErr('')
         setBusy(true)
         try {
-          const r = await api('POST', '/panel/open')
+          const r0 = await api('POST', '/panel/open')
+          // 在本机打开 dsh（地址是回环）：直接连本机的服务。远程浏览器（VPS 上的 dsh）：走 dsh 自己网页服务下的入口，先过 dsh 登录
+          const loopback = ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(window.location.hostname)
+          const r = loopback ? { ...r0, remote: false } : { ...r0, remote: true, url: `${window.location.origin}${PANEL_PREFIX}/management.html`, apiBase: `${window.location.origin}${PANEL_PREFIX}` }
           let opened = false
           // 只有拿到能直接打开的地址才开窗口（VPS 上还没有受保护入口时不开，免得闪一下空白页）
-          if (r.url && !r.tunnel && r.running) {
+          if (r.url && r.running) {
             try {
               const w = window.open(r.url, '_blank')
               if (w) { w.opener = null; opened = true }
@@ -527,16 +530,12 @@ window.__ModuleLoader__.load({
           h('div', { style: { ...S.line, marginTop: 10 } },
             h('span', { style: { ...S.meta, ...S.grow } }, L('打开后在登录页填入管理密钥：点右边复制（不会显示出来，30 秒后自动从剪贴板清除）。', 'On its sign-in page, paste the management key: copy it with the button on the right (never displayed; cleared from the clipboard after 30 seconds).')),
             h(CopyButton, { get: async () => (await api('POST', '/panel/key')).key, label: L('复制登录密钥', 'Copy sign-in key'), clearAfter: 30_000 })),
-          res && res.url && !res.tunnel && res.running && !res.opened ? h('div', { style: { ...S.meta, marginTop: 8 } },
+          res && res.url && res.running && !res.opened ? h('div', { style: { ...S.meta, marginTop: 8 } },
             L('浏览器没有自动打开新窗口，点这里打开：', 'The browser did not open a new window; open it here: '),
             h('a', { href: res.url, target: '_blank', rel: 'noopener noreferrer', style: { color: C.accent } }, res.url)) : null,
-          res?.vps && res.apiBase && !res.tunnel ? h('div', { style: { ...S.meta, marginTop: 8 } },
-            L('第一次打开时，在登录页勾选「自定义连接地址」，填入：', 'The first time, tick "custom connection address" on the sign-in page and enter:'),
+          res?.remote ? h('div', { style: { ...S.meta, marginTop: 8 } },
+            L('如果登录页提示连不上服务，勾选「自定义连接地址」，填入：', 'If the sign-in page cannot reach the service, tick "custom connection address" and enter:'),
             h('div', { style: { ...S.line, marginTop: 4 } }, h('code', { style: { ...S.mono, ...S.grow } }, res.apiBase), h(CopyButton, { get: res.apiBase }))) : null,
-          res?.tunnel ? h('div', { style: { fontSize: 12, color: C.text, marginTop: 10, padding: '10px 12px', border: `1px solid ${C.warn}`, borderRadius: 8, lineHeight: 1.7 } },
-            L('这台 dsh-vps 服务器还没有为完整管理界面开通受保护的入口（需要更新 dsh-vps）。现在可以先在你自己的电脑上执行下面的命令，再在本机浏览器打开：', 'This dsh-vps server does not yet provide a protected entry for the full interface (dsh-vps needs an update). For now, run this on your own computer, then open the address in a local browser:'),
-            h('div', { style: { ...S.line, marginTop: 4 } }, h('code', { style: { ...S.mono, ...S.grow } }, res.tunnel), h(CopyButton, { get: res.tunnel })),
-            h('div', { style: { ...S.line, marginTop: 4 } }, h('code', { style: { ...S.mono, ...S.grow } }, res.url), h(CopyButton, { get: res.url }))) : null,
           err ? h('div', { style: { fontSize: 12, color: C.err, marginTop: 6 } }, err) : null))
     }
 

@@ -75,7 +75,7 @@ describe('settings page rendering', () => {
       const service = { mode: 'vps', engine: { running: true, port: 8317, version: '8.0.13', service: null }, components: { plugins: '0.8.68', panel: '1.26.2' }, daemon: { port: 18327 }, remote: { publicUrl: 'https://x.example:9443/v1' }, canRestart: false }
       const svc = render(m, 'ServiceSection', { service, reload: noop })
       expect(svc).toContain('v0.8.68')
-      expect(svc).toContain('dsh-vps')
+      expect(svc).toContain(zh ? '服务器' : 'Server')
       expect(svc).not.toContain(zh ? '重启服务' : 'Restart service')
       const card = render(m, 'FullFeaturesCard', { openRef: { current: null } })
       expect(card).toContain(zh ? '全部功能' : 'All features')
