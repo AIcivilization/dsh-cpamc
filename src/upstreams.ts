@@ -1,4 +1,4 @@
-// upstreams.ts — 上游与引擎登录参数的映射（对照 CLIProxyAPI v8.0.13 -h 实测）
+// upstreams.ts — 上游与引擎登录参数的映射（对照引擎 v8.0.13 -h 实测）
 
 import { DshModelError } from './errors.js'
 import { L } from './i18n.js'
