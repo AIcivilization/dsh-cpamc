@@ -1,11 +1,10 @@
 // plugin/index.js — dsh-cpamc 的 dsh 插件（宿主端）
 //
-// 只做一件事：把页面的请求转给 dsh-cpamc 守护进程的 /control/*（设计 §14.1）。
+// 只做一件事：把页面的请求转给 dsh-cpamc 守护进程的 /control/*。
 // - 路由 /api-dsh-cpamc/call 与 /api-dsh-cpamc/token，挂在 dsh 自己的 webServer 上，所以先过 dsh 的登录校验；
 // - 只收同源的 POST JSON，并且要带页面令牌（宿主经 index-inject / tapIndex 注入页面，跨站网页读不到）；
 // - 守护进程的地址与控制密钥从 ~/.dsh-cpamc/bridge.json 读（dsh 与守护进程是同一个用户），浏览器永远拿不到；
 // - 只转发白名单里的控制接口。
-// 写法照 dsh-vps-manager（同作者）的 routes.js。
 
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
@@ -30,20 +29,20 @@ const ALLOWED = [
   ['GET', /^\/usage(\?refresh=1)?$/],
   ['GET', /^\/stats$/],
   ['GET', /^\/keys$/],
+  ['GET', /^\/keys-info$/],
   ['POST', /^\/keys$/],
   ['DELETE', /^\/keys\/[A-Za-z0-9._-]{1,40}$/],
   ['POST', /^\/keys\/[A-Za-z0-9._-]{1,40}\/rotate$/],
   ['POST', /^\/keys\/[A-Za-z0-9._-]{1,40}\/reveal$/],
   ['GET', /^\/endpoints$/],
+  ['GET', /^\/service$/],
+  ['POST', /^\/service\/restart$/],
+  ['POST', /^\/panel\/(open|key)$/],
   ['GET', /^\/self$/],
   ['POST', /^\/self\/(update|uninstall)$/],
   ['GET', /^\/sources\/[a-z-]{2,20}\/models$/],
   ['POST', /^\/sources\/[a-z-]{2,20}\/models$/],
-  ['POST', /^\/sources\/[a-z-]{2,20}\/(enable|disable|logout)$/],
-  ['POST', /^\/opencode\/key$/],
-  ['GET', /^\/login\/[A-Za-z0-9._-]{1,120}$/],
-  ['POST', /^\/login\/[A-Za-z0-9._-]{1,120}\/callback$/],
-  ['DELETE', /^\/login\/[A-Za-z0-9._-]{1,120}$/],
+  ['POST', /^\/sources\/[a-z-]{2,20}\/(show|hide)$/],
 ]
 
 function home() {

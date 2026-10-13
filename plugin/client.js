@@ -1,9 +1,10 @@
 /* global window, document, fetch, navigator, setTimeout, clearTimeout, setInterval, clearInterval */
-// plugin/client.js — dsh-cpamc 的设置页（设计 §14）
+// plugin/client.js — dsh-cpamc 的设置页（设计 §5）
 //
-// 手写单文件 bundle，没有构建链：由 dsh web 客户端的 ModuleLoader 注入（写法照 dsh-vps-manager）。
-// 挂在「设置 → dsh-cpamc」：来源开关 + 订阅用量、API key 状态、模型统计。
-// 界面只通过 /api-dsh-cpamc/call 调宿主，宿主再转给 dsh-cpamc 守护进程；页面拿不到任何密钥。
+// 手写单文件 bundle，没有构建链：由 dsh web 客户端的 ModuleLoader 注入。
+// 挂在「设置 → dsh-cpamc」：页眉（名称、版本、更新、卸载）→ 模型管理 → API Key → 服务 →「全部功能」卡片。
+// 界面只通过 /api-dsh-cpamc/call 调宿主，宿主再转给 dsh-cpamc 守护进程；页面拿不到守护进程或引擎的密钥。
+// 语言跟随 dsh（页面的 lang），没有单独的语言选择。
 // 硬约束：界面崩了不能影响 dsh，注册一律包在 try/catch 里。
 
 window.__ModuleLoader__.load({
@@ -14,7 +15,7 @@ window.__ModuleLoader__.load({
     const { useCallback, useEffect, useRef, useState } = React
     const h = React.createElement
 
-    // —— 语言：跟着页面（dsh 只有中文、英文两种）——
+    // —— 语言：跟着 dsh ——
     const isZh = () => {
       const l = (document.documentElement.lang || navigator.language || 'zh').toLowerCase()
       return l.startsWith('zh')
@@ -70,7 +71,7 @@ window.__ModuleLoader__.load({
       card: { border: `1px solid ${C.border}`, borderRadius: 10, background: C.layer, overflow: 'hidden' },
       row: { padding: '12px 14px', borderTop: `1px solid ${C.border}` },
       rowFirst: { padding: '12px 14px' },
-      line: { display: 'flex', alignItems: 'center', gap: 10, minHeight: 28 },
+      line: { display: 'flex', alignItems: 'center', gap: 10, minHeight: 28, flexWrap: 'wrap' },
       label: { fontSize: 14, fontWeight: 500, color: C.text },
       meta: { fontSize: 12, color: C.sub },
       grow: { flex: 1, minWidth: 0 },
@@ -81,6 +82,7 @@ window.__ModuleLoader__.load({
       table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
       th: { textAlign: 'left', fontWeight: 500, color: C.sub, padding: '6px 10px', borderBottom: `1px solid ${C.border}` },
       td: { padding: '6px 10px', borderBottom: `1px solid ${C.border}`, color: C.text, whiteSpace: 'nowrap' },
+      chip: (color) => ({ fontSize: 11, color, marginLeft: 6, border: `1px solid ${color}`, borderRadius: 4, padding: '0 4px', whiteSpace: 'nowrap' }),
     }
 
     // —— 小部件 ——
@@ -90,6 +92,7 @@ window.__ModuleLoader__.load({
         role: 'switch',
         'aria-checked': on,
         'aria-label': label,
+        title: label,
         disabled: busy,
         onClick: () => onChange(!on),
         style: {
@@ -117,7 +120,7 @@ window.__ModuleLoader__.load({
       const t = d ? L(`${d} 天 ${hh} 小时`, `${d}d ${hh}h`) : hh ? L(`${hh} 小时 ${mm} 分`, `${hh}h ${mm}m`) : L(`${mm} 分`, `${mm}m`)
       return L(`${t}后重置`, `resets in ${t}`)
     }
-    const winLabel = (w) => ({ '5h': L('5 小时', '5 hours'), '7d': L('每周', 'Weekly'), '30d': L('每月', 'Monthly'), quota: L('总额度', 'Quota'), 'Opus 7d': L('Opus 每周', 'Opus weekly'), 'Sonnet 7d': L('Sonnet 每周', 'Sonnet weekly') }[w.label] || w.label)
+    const winLabel = (w) => ({ '5h': L('5 小时', '5 hours'), '7d': L('每周', 'Weekly'), '30d': L('每月', 'Monthly'), quota: L('总额度', 'Quota') }[w.label] || w.label)
     const pct = (x) => (x == null ? '-' : `${Math.round(x * 100)}%`)
     const ms = (x) => (x == null ? '-' : x >= 1000 ? `${(x / 1000).toFixed(1)}s` : `${x}ms`)
     const ago = (iso) => {
@@ -126,46 +129,6 @@ window.__ModuleLoader__.load({
       return m < 1 ? L('刚刚', 'just now') : m < 60 ? L(`${m} 分钟前`, `${m}m ago`) : m < 1440 ? L(`${Math.round(m / 60)} 小时前`, `${Math.round(m / 60)}h ago`) : L(`${Math.round(m / 1440)} 天前`, `${Math.round(m / 1440)}d ago`)
     }
     const rateColor = (x) => (x == null ? C.sub : x >= 0.98 ? C.ok : x >= 0.9 ? C.warn : C.err)
-
-    function Usage({ usage, subscribeUrl }) {
-      if (!usage) return null
-      if (usage.noAccess) {
-        return h('div', { style: { ...S.line, alignItems: 'flex-start', fontSize: 12, color: C.warn, marginTop: 6, paddingLeft: 46, lineHeight: 1.6 } },
-          h('span', { style: S.grow }, L(`当前账号没有可用订阅，调用会被拒绝（不会扣费），所以它的模型已在 dsh 中隐藏。开通后把开关关掉再打开即可恢复。${usage.error ? `（${usage.error}）` : ''}`, 'This account has no usable subscription — calls are refused (no charge), so its models are hidden in dsh. After subscribing, turn the switch off and on again.')),
-          subscribeUrl ? h('a', { href: subscribeUrl, target: '_blank', rel: 'noopener noreferrer', style: { ...S.btnPrimary, textDecoration: 'none', flex: 'none' } }, L('去开通 ↗', 'Subscribe ↗')) : null)
-      }
-      if (usage.unsupported) return h('div', { style: { ...S.meta, marginTop: 6, paddingLeft: 46 } }, L('已实测可以调用；用量暂不支持查询', 'Tested OK; usage not available yet'))
-      const lines = []
-      if (usage.plan) lines.push(h('div', { key: 'plan', style: { ...S.meta, marginTop: 6 } }, `${L('套餐', 'Plan')}：${usage.plan}`))
-      for (const w of usage.windows || []) {
-        lines.push(h('div', { key: w.id, style: { ...S.line, minHeight: 22, fontSize: 12, color: C.text } },
-          h('span', { style: { width: 72, color: C.sub } }, winLabel(w)),
-          w.usedPercent != null ? h(Bar, { pct: w.usedPercent }) : null,
-          w.usedPercent != null ? h('span', { style: { width: 40, textAlign: 'right' } }, `${Math.round(w.usedPercent)}%`) : null,
-          w.used != null && w.limit != null ? h('span', { style: { color: C.sub } }, `${w.used}/${w.limit}`) : null,
-          h('span', { style: { color: C.faint } }, until(w.resetAt))))
-      }
-      if (usage.credits) {
-        const c = usage.credits
-        lines.push(h('div', { key: 'credits', style: { ...S.line, minHeight: 22, fontSize: 12 } },
-          h('span', { style: { width: 72, color: C.sub } }, L('积分', 'Credits')),
-          c.total ? h(Bar, { pct: 100 - (c.remaining / c.total) * 100 }) : null,
-          h('span', null, c.unlimited ? L('不限量', 'Unlimited') : L(`剩余 ${c.remaining.toLocaleString()}${c.total ? ` / ${c.total.toLocaleString()}` : ''}`, `${c.remaining.toLocaleString()} left${c.total ? ` of ${c.total.toLocaleString()}` : ''}`))))
-      }
-      if (usage.error) lines.push(h('div', { key: 'err', style: { fontSize: 12, color: C.warn, marginTop: 4 } }, `${L('用量暂不可用', 'Usage unavailable')}：${usage.error}`))
-      return h('div', { style: { marginTop: 4, paddingLeft: 46 } }, lines)
-    }
-
-    // —— 登录弹窗 ——
-    function Modal({ title, children, onClose }) {
-      return h('div', {
-        role: 'dialog', 'aria-modal': true,
-        style: { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 },
-        onClick: (e) => { if (e.target === e.currentTarget) onClose() },
-      }, h('div', { style: { width: 'min(520px, 100%)', background: C.base, color: C.text, borderRadius: 12, padding: 20, boxShadow: 'var(--dsw-elevation-soft, 0 8px 30px rgba(0,0,0,.2))' } },
-        h('div', { style: { ...S.line, marginBottom: 12 } }, h('div', { style: { ...S.h, ...S.grow, margin: 0 } }, title), h('button', { type: 'button', style: S.btn, onClick: onClose }, L('关闭', 'Close'))),
-        children))
-    }
 
     async function copy(text) {
       try {
@@ -189,129 +152,142 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** 复制按钮：get 可以是异步取值（例如取完整 key）；点完显示"已复制" */
-    function CopyButton({ get, label, style }) {
+    /** 复制按钮：get 可以是异步取值（例如取完整 key）；点完显示"已复制"。clearAfter：多少毫秒后清空剪贴板（尽力而为） */
+    function CopyButton({ get, label, style, clearAfter }) {
       const [state, setState] = useState('')
       const timer = useRef(null)
       useEffect(() => () => clearTimeout(timer.current), [])
       const onClick = async () => {
         let done = false
-        try { done = await copy(typeof get === 'function' ? await get() : get) } catch { done = false }
+        let value = ''
+        try { value = typeof get === 'function' ? await get() : get; done = await copy(value) } catch { done = false }
         setState(done ? 'ok' : 'fail')
         clearTimeout(timer.current)
         timer.current = setTimeout(() => setState(''), 1500)
+        if (done && clearAfter) {
+          setTimeout(async () => {
+            try { if ((await navigator.clipboard.readText()) === value) await navigator.clipboard.writeText('') } catch { /* 读不了剪贴板就算了 */ }
+          }, clearAfter)
+        }
       }
       return h('button', { type: 'button', style: { ...S.btn, ...(style || {}), ...(state === 'ok' ? { color: C.ok } : state === 'fail' ? { color: C.err } : {}) }, onClick },
         state === 'ok' ? L('已复制', 'Copied') : state === 'fail' ? L('复制失败', 'Copy failed') : (label || L('复制', 'Copy')))
     }
 
-    // —— 访问地址 ——
-    function EndpointCard({ endpoints }) {
-      if (!endpoints) return null
-      const rows = [
-        ...(endpoints.public ? [{ id: 'public', name: L('外网地址', 'Public'), url: endpoints.public, note: L('你的电脑、手机或其他软件用这个', 'Use this from your computer, phone or other tools') }] : []),
-        { id: 'local', name: L('本机地址', 'Local'), url: endpoints.local, note: endpoints.public ? L('只在这台服务器上能用（dsh 自己用的就是它）', 'Only works on this server (dsh itself uses it)') : L('只在本机能用；要从别的设备访问，在服务器上执行 dsh-cpamc remote enable', 'Only works on this machine; to reach it from other devices run dsh-cpamc remote enable') },
-      ]
-      return h('div', { style: S.section },
-        h('div', { style: S.h }, L('访问地址', 'Endpoint')),
-        h('p', { style: S.note }, L('所有模型都经同一个 OpenAI 兼容端点提供：Base URL 填下面的地址，API key 用下方任意一把。', 'Every model is served from one OpenAI-compatible endpoint: use the address below as Base URL and any key below as the API key.')),
-        h('div', { style: S.card }, rows.map((r, i) => h('div', { key: r.id, style: i ? S.row : S.rowFirst },
-          h('div', { style: S.line },
-            h('span', { style: { ...S.label, width: 72, flex: 'none' } }, r.name),
-            h('code', { style: { ...S.mono, ...S.grow, wordBreak: 'break-all' } }, r.url),
-            h(CopyButton, { get: r.url })),
-          h('div', { style: { ...S.meta, paddingLeft: 82 } }, r.note)))))
+    function PriceTag({ pricing }) {
+      if (!pricing) return null
+      const color = pricing.tier === 'free' ? C.ok : pricing.tier === 'limited' ? C.warn : C.err
+      const text = pricing.tier === 'free' ? L('免费额度', 'Free quota') : pricing.tier === 'limited' ? L('免费·额度少', 'Free · limited') : L('需付费', 'Paid')
+      return h('span', { title: L(pricing.zh, pricing.en), style: S.chip(color) }, text)
     }
 
-    function LoginDialog({ source, session, onDone, onClose }) {
-      const [s, setS] = useState(session)
-      const [paste, setPaste] = useState('')
-      const [msg, setMsg] = useState('')
-      useEffect(() => {
-        let stop = false
-        const tick = async () => {
-          if (stop) return
-          try {
-            const st = await api('GET', `/login/${encodeURIComponent(session.id)}`)
-            setS(st)
-            if (st.status === 'ok') { onDone(); return }
-            if (st.status === 'error' || st.status === 'cancelled') return
-          } catch { /* 网络抖动：下一轮 */ }
-          setTimeout(tick, 2000)
-        }
-        const t = setTimeout(tick, 2000)
-        return () => { stop = true; clearTimeout(t) }
-      }, [session.id])
-      const submit = async (value) => {
-        const v = String(value ?? paste).trim()
-        if (!v) return
-        if (!/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/.*[?&]code=/i.test(v)) {
-          setMsg(L('这不像授权后的跳转地址：应以 http://localhost 或 http://127.0.0.1 开头，并带 code=', 'This does not look like the redirect address: it should start with http://localhost or http://127.0.0.1 and contain code='))
-          return
-        }
-        setMsg(L('已提交，等待确认…', 'Submitted, waiting…'))
-        try { await api('POST', `/login/${encodeURIComponent(session.id)}/callback`, { redirectUrl: v }) } catch (e) { setMsg(e.message) }
-      }
-      const fromClipboard = async () => {
+    /** 来源状态：未登录 / 可用 / 无可用额度 / 已停用 / 状态未知 */
+    function statusOf(s) {
+      if (!s.loggedIn) return { text: L('未登录', 'Signed out'), color: C.faint }
+      if (!s.active) return { text: L('已停用', 'Disabled'), color: C.warn, hint: L('凭据在完整管理界面里被停用了', 'Its credentials were disabled in the full management interface') }
+      if (s.usage?.noAccess) return { text: L('无可用额度', 'No quota'), color: C.warn }
+      if (s.usage && !s.usage.error) return { text: L('可用', 'Ready'), color: C.ok }
+      return { text: L('已登录', 'Signed in'), color: C.ok }
+    }
+
+    // —— 页眉（R7）——
+    const newer = (a, b) => {
+      const pa = String(a || '').split(/[.-]/).map((x) => parseInt(x, 10) || 0)
+      const pb = String(b || '').split(/[.-]/).map((x) => parseInt(x, 10) || 0)
+      for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0)
+      return false
+    }
+
+    function Header({ self, onJob }) {
+      const [confirming, setConfirming] = useState(false)
+      const [keepAuth, setKeepAuth] = useState(false)
+      const [err, setErr] = useState('')
+      const [starting, setStarting] = useState(false)
+      const [showCmd, setShowCmd] = useState('')
+      const version = self?.version
+      const hasUpdate = Boolean(self?.latest && version && newer(self.latest, version))
+      const start = async (action) => {
+        if (starting) return
+        if (!self.canManage) { setShowCmd(action); return }
+        setErr('')
+        setStarting(true)
         try {
-          const t = (await navigator.clipboard.readText()).trim()
-          setPaste(t)
-          await submit(t)
-        } catch {
-          setMsg(L('浏览器不允许读剪贴板：请手动粘贴到输入框', 'The browser blocked clipboard access: paste into the box manually'))
+          await api('POST', `/self/${action}`, action === 'uninstall' ? { keepAuth } : {})
+          onJob({ action, from: version, target: self.latest })
+        } catch (e) {
+          // 连不上守护进程多半是它已经开始重启（任务已经在跑）：照样进进度页，等它回来
+          if (e.code === 'daemon_unreachable') onJob({ action, from: version, target: self.latest })
+          else setErr(e.message)
+        } finally {
+          setStarting(false)
         }
       }
-      const cancel = async () => {
-        try { await api('DELETE', `/login/${encodeURIComponent(session.id)}`) } catch { /* ignore */ }
-        onClose()
-      }
-      return h(Modal, { title: L(`登录 ${source.label}`, `Sign in to ${source.label}`), onClose: cancel },
-        h('p', { style: S.note }, L('在浏览器里打开下面的链接并授权（这台服务器不需要浏览器，用你自己的电脑或手机都行）。', 'Open this link in a browser and approve (any device works; this server needs no browser).')),
-        h('div', { style: { ...S.line, marginBottom: 10 } },
-          h('a', { href: s.url, target: '_blank', rel: 'noopener noreferrer', style: { ...S.btnPrimary, textDecoration: 'none' } }, L('打开授权页', 'Open authorization page')),
-          h('button', { type: 'button', style: S.btn, onClick: () => copy(s.url) }, L('复制链接', 'Copy link'))),
-        s.userCode ? h('div', { style: { ...S.line, marginBottom: 10 } },
-          h('span', { style: S.meta }, L('授权页要求输入的码：', 'Code to enter:')),
-          h('span', { style: { ...S.mono, fontSize: 18, fontWeight: 600, letterSpacing: 2 } }, s.userCode),
-          h('button', { type: 'button', style: S.btn, onClick: () => copy(s.userCode) }, L('复制', 'Copy'))) : null,
-        s.needsPaste ? h('div', { style: { marginBottom: 10 } },
-          h('div', { style: { ...S.note, color: C.text } },
-            h('div', null, L('授权完成后还差一步：', 'One more step after approving:')),
-            h('div', null, L('① 浏览器会跳到一个打不开的页面（「无法访问此网站」「拒绝连接」），地址以 http://localhost 或 http://127.0.0.1 开头——这是正常的。', '① The browser lands on a page that cannot load ("This site can\'t be reached"), starting with http://localhost or http://127.0.0.1 — that is expected.')),
-            h('div', null, L('② 复制那个页面地址栏里的完整地址，回到这里点「从剪贴板粘贴」（或粘到输入框点提交）。', '② Copy the full address from its address bar, come back and press "Paste from clipboard" (or paste into the box and submit).')),
-            h('div', { style: { color: C.sub } }, L(`这个跳转地址是 ${source.label} 写死的，服务商只接受它，没法换成网址；所以要你把它带回来。`, `${source.label} fixes this redirect address and accepts nothing else, so it cannot be a web URL; you carry it back instead.`))),
-          h('div', { style: S.line },
-            h('input', { style: { ...S.input, ...S.grow }, placeholder: 'http://127.0.0.1:…/callback?code=…', value: paste, onChange: (e) => setPaste(e.target.value), onPaste: (e) => { const t = e.clipboardData?.getData('text'); if (t) setTimeout(() => void submit(t), 0) } }),
-            h('button', { type: 'button', style: S.btnPrimary, onClick: fromClipboard }, L('从剪贴板粘贴', 'Paste from clipboard')),
-            h('button', { type: 'button', style: S.btn, onClick: () => void submit() }, L('提交', 'Submit')))) : null,
-        h('p', { style: { ...S.note, marginTop: 4 } }, L('授权页本身报错（例如 Operation timed out、糟糕出错了）多半是你的浏览器访问该网站的网络问题：换个代理节点，在那个页面点「重试」。', 'If the authorization page itself errors (e.g. "Operation timed out"), it is usually your browser\'s network path to that site: switch proxy nodes and press Retry on that page.')),
-        h('div', { style: { fontSize: 12, color: s.status === 'error' ? C.err : C.sub } },
-          s.status === 'pending' ? (msg || L('等待授权中…', 'Waiting for approval…')) : s.status === 'ok' ? L('已登录', 'Signed in') : `${L('登录没有完成', 'Login did not complete')}：${s.error || s.status}`))
+      return h('div', { style: { ...S.section, marginBottom: 20 } },
+        h('div', { style: { ...S.line, gap: 12 } },
+          h('span', { style: { fontSize: 18, fontWeight: 600, color: C.text } }, 'dsh-cpamc'),
+          version ? h('span', { style: { ...S.meta, ...S.mono } }, `v${version}`) : null,
+          h('span', { style: S.grow }),
+          hasUpdate ? h('button', { type: 'button', style: S.btnPrimary, disabled: starting, onClick: () => void start('update') }, starting ? L('正在开始…', 'Starting…') : L(`更新到 v${self.latest}`, `Update to v${self.latest}`)) : null,
+          self ? h('button', { type: 'button', style: { ...S.btn, color: C.err }, onClick: () => setConfirming(!confirming) }, L('卸载', 'Uninstall')) : null),
+        showCmd && self ? h('div', { style: { ...S.card, padding: '10px 12px', marginTop: 10 } },
+          h('div', { style: S.meta }, L('服务器上这一步要 root 权限，请在服务器终端里执行：', 'On the server this needs root; run in a server terminal:')),
+          h('div', { style: { ...S.line, minHeight: 30 } }, h('code', { style: { ...S.mono, ...S.grow } }, self.commands[showCmd]), h(CopyButton, { get: self.commands[showCmd] }))) : null,
+        confirming ? h('div', { style: { marginTop: 10, padding: 12, border: `1px solid ${C.err}`, borderRadius: 8 } },
+          h('div', { style: { fontSize: 13, color: C.text, lineHeight: 1.7 } }, L(
+            '卸载会依次：撤下对外访问 → 把 dsh 里的模型配置还原 → 停止并移除模型服务与守护进程 → 确认端口已释放 → 删除 ~/.dsh-cpamc（含各来源的登录凭据）→ 从 dsh 移除本插件。任何一步没完成都会停下来并可以重试，不会显示「已卸载」。',
+            'Uninstall will: remove remote access → restore dsh\'s model config → stop and remove the model service and daemon → confirm the ports are free → delete ~/.dsh-cpamc (including source sign-ins) → remove this plugin from dsh. If any step fails it stops there and can be retried; it never reports success early.')),
+          h('label', { style: { ...S.line, fontSize: 13, marginTop: 6, cursor: 'pointer' } },
+            h('input', { type: 'checkbox', checked: keepAuth, onChange: (e) => setKeepAuth(e.target.checked) }),
+            L('先把各来源的登录凭据备份到主目录（以后重装可以拷回来）', 'Back up source sign-ins to the home folder first (to reuse after reinstalling)')),
+          h('div', { style: { ...S.line, marginTop: 8 } },
+            h('button', { type: 'button', style: { ...S.btnPrimary, background: C.err }, disabled: starting, onClick: () => void start('uninstall') }, starting ? L('正在开始…', 'Starting…') : L('确认卸载', 'Uninstall')),
+            h('button', { type: 'button', style: S.btn, onClick: () => setConfirming(false) }, L('取消', 'Cancel')))) : null,
+        err ? h('div', { style: { fontSize: 12, color: C.err, marginTop: 6 } }, err) : null)
     }
 
-    function KeyDialog({ onDone, onClose }) {
-      const [key, setKey] = useState('')
-      const [busy, setBusy] = useState(false)
-      const [msg, setMsg] = useState('')
-      const submit = async () => {
-        setBusy(true)
-        setMsg(L('正在用一个免费模型实测这把 key…', 'Testing the key against a free model…'))
-        try { await api('POST', '/opencode/key', { key: key.trim() }); onDone() } catch (e) { setMsg(e.message); setBusy(false) }
+    // —— 模型管理（R2 ①、R3、R6）——
+    function Usage({ usage, subscribeUrl }) {
+      if (!usage) return null
+      if (usage.noAccess) {
+        return h('div', { style: { ...S.line, alignItems: 'flex-start', fontSize: 12, color: C.warn, marginTop: 6, paddingLeft: 46, lineHeight: 1.6 } },
+          h('span', { style: S.grow }, L(`当前账号没有可用额度，调用会被拒绝，所以它的模型没有放进 dsh。${usage.error ? `（${usage.error}）` : ''}`, `This account has no usable quota — calls are refused, so its models are not in dsh.${usage.error ? ` (${usage.error})` : ''}`)),
+          subscribeUrl ? h('a', { href: subscribeUrl, target: '_blank', rel: 'noopener noreferrer', style: { ...S.btn, textDecoration: 'none', flex: 'none' } }, L('看套餐 ↗', 'Plans ↗')) : null)
       }
-      return h(Modal, { title: 'OpenCode Zen', onClose },
-        h('p', { style: S.note }, L('需要你的 OpenCode Zen API key（在 opencode.ai 免费注册）。写入前会先用一个免费模型实测。', 'Needs your OpenCode Zen API key (free sign-up at opencode.ai). It is tested against a free model first.')),
-        h('div', { style: S.line },
-          h('input', { type: 'password', style: { ...S.input, ...S.grow }, placeholder: 'API key', value: key, onChange: (e) => setKey(e.target.value) }),
-          h('button', { type: 'button', style: S.btnPrimary, disabled: busy || !key.trim(), onClick: submit }, L('保存', 'Save'))),
-        msg ? h('div', { style: { ...S.meta, marginTop: 8 } }, msg) : null)
+      if (usage.unsupported) return null
+      const lines = []
+      if (usage.plan) lines.push(h('div', { key: 'plan', style: { ...S.meta, marginTop: 6 } }, `${L('套餐', 'Plan')}：${usage.plan}`))
+      for (const w of usage.windows || []) {
+        lines.push(h('div', { key: w.id, style: { ...S.line, minHeight: 22, fontSize: 12, color: C.text } },
+          h('span', { style: { width: 72, color: C.sub } }, winLabel(w)),
+          w.usedPercent != null ? h(Bar, { pct: w.usedPercent }) : null,
+          w.usedPercent != null ? h('span', { style: { width: 40, textAlign: 'right' } }, `${Math.round(w.usedPercent)}%`) : null,
+          w.used != null && w.limit != null ? h('span', { style: { color: C.sub } }, `${w.used}/${w.limit}`) : null,
+          h('span', { style: { color: C.faint } }, until(w.resetAt))))
+      }
+      if (usage.credits) {
+        const c = usage.credits
+        lines.push(h('div', { key: 'credits', style: { ...S.line, minHeight: 22, fontSize: 12 } },
+          h('span', { style: { width: 72, color: C.sub } }, L('余额', 'Balance')),
+          c.total ? h(Bar, { pct: 100 - (c.remaining / c.total) * 100 }) : null,
+          h('span', null, c.unlimited ? L('不限量', 'Unlimited') : L(`剩余 ${c.remaining.toLocaleString()}${c.total ? ` / ${c.total.toLocaleString()}` : ''}`, `${c.remaining.toLocaleString()} left${c.total ? ` of ${c.total.toLocaleString()}` : ''}`))))
+      }
+      if (usage.error) lines.push(h('div', { key: 'err', style: { fontSize: 12, color: C.warn, marginTop: 4 } }, `${L('用量暂不可用', 'Usage unavailable')}：${usage.error}`))
+      return lines.length ? h('div', { style: { marginTop: 4, paddingLeft: 46 } }, lines) : null
     }
 
-    // —— 来源 ——
-    const RISKY_KEY = 'dsh-cpamc.showRisky'
-    const readRisky = () => {
-      try { return window.localStorage.getItem(RISKY_KEY) === '1' } catch { return false }
+    /** 一个来源最近 24 小时经引擎的真实请求：请求数、成功率、平均延迟、输出速度；没有请求就写「暂无请求数据」 */
+    function SourceStats({ st }) {
+      const d = st?.d1
+      if (!d || !d.requests) return h('div', { style: { ...S.meta, paddingLeft: 46, marginTop: 2 } }, L('暂无请求数据', 'No request data yet'))
+      return h('div', { style: { ...S.meta, paddingLeft: 46, marginTop: 2 } },
+        L('最近 24 小时', 'Last 24h'), ' · ',
+        L(`${d.requests} 次请求`, `${d.requests} requests`), ' · ',
+        h('span', { style: { color: rateColor(d.successRate) } }, L(`成功率 ${pct(d.successRate)}`, `${pct(d.successRate)} success`)), ' · ',
+        L(`平均延迟 ${ms(d.avgLatencyMs)}`, `avg latency ${ms(d.avgLatencyMs)}`), ' · ',
+        d.tokensPerSec != null ? `${d.tokensPerSec} tokens/s` : L('速度暂不可用', 'speed n/a'))
     }
-    /** 勾选这个来源的哪些模型显示在 dsh 里（统一端点照常提供全部） */
+
+    /** 勾选这个来源的哪些模型显示在 dsh 里（引擎照常提供全部） */
     function ModelPicker({ source, onClose }) {
       const [data, setData] = useState(null)
       const [sel, setSel] = useState(new Set())
@@ -327,8 +303,6 @@ window.__ModuleLoader__.load({
         }, (e) => alive && setMsg(e.message))
         return () => { alive = false }
       }, [source.id])
-      if (selfJob) return h(SelfProgress, { job: selfJob, onDone: () => { setSelfJob(null); void load(true) } })
-      if (errCode === 'daemon_not_configured' || errCode === 'daemon_unreachable') return h(Onboarding, { code: errCode, onDone: () => void load(true) })
       if (!data) return h('div', { style: { ...S.meta, paddingLeft: 46, marginTop: 8 } }, msg || L('加载中…', 'Loading…'))
       const flip = (id) => setSel((x) => { const n = new Set(x); n.has(id) ? n.delete(id) : n.add(id); return n })
       const save = async (models) => {
@@ -345,49 +319,32 @@ window.__ModuleLoader__.load({
       }
       const shown = data.models.filter((m) => !q || `${m.name} ${m.id}`.toLowerCase().includes(q.toLowerCase()))
       return h('div', { style: { marginTop: 10, marginLeft: 46, padding: 10, border: `1px solid ${C.border}`, borderRadius: 8 } },
-        h('div', { style: { ...S.line, marginBottom: 6, flexWrap: 'wrap' } },
-          h('span', { style: { ...S.meta, ...S.grow } }, L(`勾选的模型显示在 dsh 的模型列表里（已选 ${sel.size} / ${data.models.length}）。其他软件经统一端点仍可用全部模型。`, `Checked models appear in dsh's model list (${sel.size} / ${data.models.length} selected). Other tools can still use every model through the endpoint.`)),
+        h('div', { style: { ...S.line, marginBottom: 6 } },
+          h('span', { style: { ...S.meta, ...S.grow } }, L(`勾选的模型显示在 dsh 的模型选择器里（已选 ${sel.size} / ${data.models.length}）。其他软件经同一个地址照样能用全部模型。`, `Checked models appear in dsh's model picker (${sel.size} / ${data.models.length} selected). Other tools can still use every model through the same address.`)),
           data.models.length > 10 ? h('input', { style: { ...S.input, width: 140 }, placeholder: L('搜索', 'Search'), value: q, onChange: (e) => setQ(e.target.value) }) : null),
-        h('div', { style: { maxHeight: 300, overflowY: 'auto' } }, shown.map((m) => h('label', { key: m.id, style: { ...S.line, minHeight: 26, fontSize: 13, cursor: 'pointer' } },
+        h('div', { style: { maxHeight: 300, overflowY: 'auto' } }, shown.map((m) => h('label', { key: m.id, style: { ...S.line, minHeight: 26, fontSize: 13, cursor: 'pointer', flexWrap: 'nowrap' } },
           h('input', { type: 'checkbox', checked: sel.has(m.id), onChange: () => flip(m.id) }),
           h('span', { style: S.grow }, m.name),
-          m.recommended ? h('span', { style: { fontSize: 11, color: C.accent } }, L('推荐', 'Suggested')) : null))),
+          m.recommended ? h('span', { title: L('免费额度，已在你的账号上实测调通', 'Free quota, tested OK on your account'), style: { fontSize: 11, color: C.accent } }, L('默认', 'Default')) : null))),
         msg ? h('div', { style: { fontSize: 12, color: C.err, marginTop: 6 } }, msg) : null,
-        h('div', { style: { ...S.line, marginTop: 8, flexWrap: 'wrap' } },
+        h('div', { style: { ...S.line, marginTop: 8 } },
           h('button', { type: 'button', style: S.btnPrimary, disabled: saving, onClick: () => save([...sel]) }, saving ? L('保存中…', 'Saving…') : L('保存', 'Save')),
-          h('button', { type: 'button', style: S.btn, disabled: saving, onClick: () => save(null) }, L('恢复推荐', 'Use suggested')),
+          h('button', { type: 'button', style: S.btn, disabled: saving, onClick: () => save(null) }, L('恢复默认', 'Use default')),
           h('button', { type: 'button', style: S.btn, onClick: () => setSel(new Set(data.models.map((m) => m.id))) }, L('全选', 'All')),
           h('button', { type: 'button', style: S.btn, onClick: () => setSel(new Set()) }, L('全不选', 'None')),
           h('span', { style: S.grow }),
           h('button', { type: 'button', style: S.btn, onClick: () => onClose(false) }, L('取消', 'Cancel'))))
     }
 
-    function SourcesCard({ sources, reload, onLogin, onKey }) {
+    function ModelsSection({ sources, stats, reload, openPanel }) {
       const [picking, setPicking] = useState('')
       const [busy, setBusy] = useState({})
       const [err, setErr] = useState('')
-      const [showRisky, setShowRisky] = useState(readRisky)
-      const toggleRisky = (v) => {
-        setShowRisky(v)
-        try { window.localStorage.setItem(RISKY_KEY, v ? '1' : '0') } catch { /* 无痕模式等：只在本次生效 */ }
-      }
-      // 高风险来源默认隐藏；已登录的照常显示，方便退出登录
-      const visible = sources.filter((s) => showRisky || !s.risky || s.loggedIn)
-      const hidden = sources.length - visible.length
-      const toggle = async (s, on) => {
+      const toggle = async (s, show) => {
         setErr('')
         setBusy((b) => ({ ...b, [s.id]: true }))
         try {
-          if (!on) await api('POST', `/sources/${s.id}/disable`)
-          else if (s.kind === 'opencode' && !s.loggedIn) onKey()
-          else {
-            let r = await api('POST', `/sources/${s.id}/enable`, {})
-            if (r.riskNotice) {
-              if (!window.confirm(r.riskNotice)) return
-              r = await api('POST', `/sources/${s.id}/enable`, { acceptRisk: true })
-            }
-            if (r.login) onLogin(s, r.login)
-          }
+          await api('POST', `/sources/${s.id}/${show ? 'show' : 'hide'}`)
           await reload()
         } catch (e) {
           setErr(`${s.label}：${e.message}`)
@@ -395,54 +352,53 @@ window.__ModuleLoader__.load({
           setBusy((b) => ({ ...b, [s.id]: false }))
         }
       }
-      const logout = async (s) => {
-        if (!window.confirm(L(`退出 ${s.label} 的登录？（它的模型会从 dsh 里消失）`, `Sign out of ${s.label}? (its models disappear from dsh)`))) return
-        try { await api('POST', `/sources/${s.id}/logout`); await reload() } catch (e) { setErr(e.message) }
-      }
+      const last = stats?.lastOk
+      const anyLogged = sources.some((s) => s.loggedIn)
       return h('div', { style: S.section },
-        h('div', { style: S.line },
-          h('div', { style: { ...S.h, ...S.grow, margin: 0 } }, L('来源', 'Sources')),
-          h('label', { style: { ...S.meta, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' } },
-            h('input', { type: 'checkbox', checked: showRisky, onChange: (e) => toggleRisky(e.target.checked) }),
-            L(`显示高风险来源${!showRisky && hidden ? `（${hidden}）` : ''}`, `Show high-risk sources${!showRisky && hidden ? ` (${hidden})` : ''}`))),
-        h('p', { style: S.note }, L('打开就接入，没登录会弹出登录；关闭只停用，登录保留。标「需付费」的来源，要先在那家开通套餐，登录后才能用。', 'Turn on to connect (signs in if needed); turning off keeps the sign-in. Sources marked Paid need a plan from that provider before they work.')),
-        err ? h('div', { style: { fontSize: 12, color: C.err, margin: '0 0 8px' } }, err) : null,
-        showRisky ? h('p', { style: { ...S.note, color: C.warn } }, L('高风险来源（Claude、Antigravity）：服务商有封禁第三方使用订阅的先例，账号可能被封。仅在你清楚风险时使用。', 'High-risk sources (Claude, Antigravity): the providers have banned third-party use of subscriptions before; your account may be suspended. Use only if you accept the risk.')) : null,
-        h('div', { style: S.card }, visible.map((s, i) => h('div', { key: s.id, style: i ? S.row : S.rowFirst },
+        h('div', { style: S.h }, L('模型管理', 'Models')),
+        h('p', { style: S.note }, L('六个来源都已装好。登录过、检查通过的来源，它的模型才会出现在 dsh 的模型选择器里；开关只决定在 dsh 里显示还是隐藏，不会改动账号和完整管理界面里的设置。',
+          'All six sources are installed. Only signed-in, verified sources put models into dsh\'s model picker; the switch only shows or hides them in dsh and never changes accounts or settings in the full management interface.')),
+        h('div', { style: { ...S.card, padding: '10px 14px', marginBottom: 10 } },
           h('div', { style: S.line },
-            h(Switch, { on: s.enabled, busy: busy[s.id], label: s.label, onChange: (on) => toggle(s, on) }),
-            h('div', { style: S.grow },
-              h('span', { style: S.label }, s.label),
-              h(PriceTag, { pricing: s.pricing }),
-              s.risky ? h('span', { style: { fontSize: 11, color: C.err, marginLeft: 6, border: `1px solid ${C.err}`, borderRadius: 4, padding: '0 4px' } }, L('高风险', 'High risk')) : null,
-              h('span', { style: { ...S.meta, marginLeft: 8 } },
-                s.loggedIn ? (s.account || '') : s.kind === 'local' ? L('未运行', 'Not running') : L('未登录', 'Signed out'),
-                s.models ? ` · ${L(`${s.models} 个模型`, `${s.models} models`)}` : '')),
-            s.loggedIn && s.enabled && s.models && !s.usage?.noAccess ? h('button', { type: 'button', style: S.btn, onClick: () => setPicking(picking === s.id ? '' : s.id) }, L('选模型', 'Models')) : null,
-            s.loggedIn && s.kind !== 'opencode' && s.kind !== 'local' ? h('button', { type: 'button', style: S.btn, onClick: () => logout(s) }, L('退出登录', 'Sign out')) : null,
-            s.kind === 'opencode' && s.loggedIn ? h('button', { type: 'button', style: S.btn, onClick: onKey }, L('换 key', 'Change key')) : null),
-          picking === s.id ? h(ModelPicker, { source: s, onClose: (saved) => { setPicking(''); if (saved) void reload() } }) : null,
-          s.enabled ? h(Usage, { usage: s.usage, subscribeUrl: s.subscribeUrl }) : null,
-          !s.loggedIn && s.pricing ? h('div', { style: { ...S.meta, paddingLeft: 46, marginTop: 4 } },
-            L(s.pricing.zh, s.pricing.en),
-            s.subscribeUrl && s.kind === 'local' ? h('a', { href: s.subscribeUrl, target: '_blank', rel: 'noopener noreferrer', style: { color: C.accent, marginLeft: 8 } }, L('去下载 ↗', 'Download ↗')) : null,
-            s.subscribeUrl && s.pricing.tier !== 'free' ? h('a', { href: s.subscribeUrl, target: '_blank', rel: 'noopener noreferrer', style: { color: C.accent, marginLeft: 8 } }, s.kind === 'opencode' ? L('去充值 ↗', 'Top up ↗') : L('看套餐 ↗', 'Plans ↗')) : null) : null,
-          !s.loggedIn && s.detail ? h('div', { style: { ...S.meta, paddingLeft: 46, marginTop: 4 } }, s.detail) : null))))
+            h('span', { style: { ...S.meta, width: 72 } }, L('最近使用', 'Last used')),
+            last ? h('span', { style: S.grow }, h('code', { style: S.mono }, last.model), h('span', { style: { ...S.meta, marginLeft: 8 } }, `${last.source} · ${ago(last.at)}`))
+              : h('span', { style: { ...S.meta, ...S.grow } }, L('暂无请求数据', 'No request data yet'))),
+          h('div', { style: { ...S.meta, color: C.faint } }, L('dsh 当前对话选的是哪个模型，dsh 没有提供读取接口；这里显示 dsh 最近一次成功请求用到的模型。', 'dsh does not expose which model the current chat uses; this is the model of dsh\'s most recent successful request.'))),
+        !anyLogged ? h('div', { style: { ...S.card, padding: '10px 14px', marginBottom: 10, fontSize: 13 } },
+          L('还没有登录任何来源。点下方「全部功能」，在完整管理界面里登录 WorkBuddy、Trae、Qoder、ZCode 或你的 Claude / Codex 订阅。', 'No source is signed in yet. Open All features below and sign in to WorkBuddy, Trae, Qoder, ZCode or your Claude / Codex subscription in the full management interface.')) : null,
+        err ? h('div', { style: { fontSize: 12, color: C.err, margin: '0 0 8px' } }, err) : null,
+        h('div', { style: S.card }, sources.map((s, i) => {
+          const st = statusOf(s)
+          const usable = s.loggedIn && s.active && !s.usage?.noAccess
+          return h('div', { key: s.id, style: i ? S.row : S.rowFirst },
+            h('div', { style: S.line },
+              h(Switch, { on: s.shown, busy: busy[s.id], label: s.shown ? L('在 dsh 中显示（点一下隐藏）', 'Shown in dsh (click to hide)') : L('在 dsh 中隐藏（点一下显示）', 'Hidden in dsh (click to show)'), onChange: (on) => toggle(s, on) }),
+              h('div', { style: S.grow },
+                h('span', { style: S.label }, s.label),
+                h(PriceTag, { pricing: s.pricing }),
+                h('span', { title: st.hint || '', style: S.chip(st.color) }, st.text),
+                !s.shown ? h('span', { style: S.chip(C.faint) }, L('已隐藏', 'Hidden')) : null,
+                h('span', { style: { ...S.meta, marginLeft: 8 } },
+                  s.loggedIn ? (s.account || '') : '',
+                  s.models ? ` · ${L(`${s.models} 个模型`, `${s.models} models`)}` : '')),
+              usable && s.shown && s.models ? h('button', { type: 'button', style: S.btn, onClick: () => setPicking(picking === s.id ? '' : s.id) }, L('选模型', 'Models')) : null,
+              !s.loggedIn ? h('button', { type: 'button', style: S.btn, onClick: openPanel }, L('在全部功能中登录', 'Sign in under All features')) : null),
+            picking === s.id ? h(ModelPicker, { source: s, onClose: (saved) => { setPicking(''); if (saved) void reload() } }) : null,
+            s.loggedIn ? h(SourceStats, { st: stats?.bySource?.[s.id] }) : null,
+            s.loggedIn ? h(Usage, { usage: s.usage, subscribeUrl: s.subscribeUrl }) : null,
+            !s.loggedIn ? h('div', { style: { ...S.meta, paddingLeft: 46, marginTop: 4 } },
+              L(s.pricing.zh, s.pricing.en),
+              s.subscribeUrl && s.pricing.tier !== 'free' ? h('a', { href: s.subscribeUrl, target: '_blank', rel: 'noopener noreferrer', style: { color: C.accent, marginLeft: 8 } }, L('看套餐 ↗', 'Plans ↗')) : null) : null,
+            s.loggedIn && s.detail ? h('div', { style: { ...S.meta, paddingLeft: 46, marginTop: 4, color: C.warn } }, s.detail) : null)
+        })))
     }
 
-    /** 费用标签：免费 / 免费·额度少 / 需付费 */
-    function PriceTag({ pricing }) {
-      if (!pricing) return null
-      const color = pricing.tier === 'free' ? C.ok : pricing.tier === 'limited' ? C.warn : C.err
-      const text = pricing.tier === 'free' ? L('免费', 'Free') : pricing.tier === 'limited' ? L('免费·额度少', 'Free · limited') : L('需付费', 'Paid')
-      return h('span', { title: L(pricing.zh, pricing.en), style: { fontSize: 11, color, marginLeft: 6, border: `1px solid ${color}`, borderRadius: 4, padding: '0 4px', whiteSpace: 'nowrap' } }, text)
-    }
-
-    // —— key ——
-    function KeysCard({ keys, reload }) {
+    // —— API Key（R2 ②）——
+    function KeysSection({ info, endpoints, reload }) {
       const [name, setName] = useState('')
       const [fresh, setFresh] = useState(null)
       const [err, setErr] = useState('')
+      const keys = info?.keys || []
       const add = async () => {
         setErr('')
         try { const r = await api('POST', '/keys', { name: name.trim() }); setFresh(r); setName(''); await reload() } catch (e) { setErr(e.message) }
@@ -455,51 +411,129 @@ window.__ModuleLoader__.load({
         if (!window.confirm(L(`吊销 ${k.name}？用它的设备会立即无法访问。`, `Revoke ${k.name}? Devices using it lose access immediately.`))) return
         try { await api('DELETE', `/keys/${encodeURIComponent(k.name)}`); await reload() } catch (e) { setErr(e.message) }
       }
+      const addrs = endpoints ? [
+        ...(endpoints.public ? [{ id: 'public', name: L('外部地址', 'Public'), url: endpoints.public, note: L('你的电脑、手机或其他软件用这个', 'Use this from your computer, phone or other tools') }] : []),
+        { id: 'local', name: L('本机地址', 'Local'), url: endpoints.local, note: endpoints.public ? L('只在这台服务器上能用（dsh 自己用的就是它）', 'Only works on this server (dsh itself uses it)') : L('只在这台电脑上能用', 'Only works on this computer') },
+      ] : []
       return h('div', { style: S.section },
-        h('div', { style: S.h }, 'API key'),
-        h('p', { style: S.note }, L('OpenAI 格式，点「复制」拿完整 key。dsh 用名为 dsh 的那把（自动配置）；其他设备或软件各领一把，丢了就吊销。下面是最近 24 小时的状态。', 'OpenAI-style; click Copy to get the full key. dsh uses the "dsh" key (configured automatically); give each other device or tool its own key and revoke it if lost. Stats cover the last 24 hours.')),
+        h('div', { style: S.h }, 'API Key'),
+        h('p', { style: S.note }, L('所有模型都经同一个 OpenAI 兼容地址提供：Base URL 填下面的地址，API Key 用下面任意一把。dsh 用名为 dsh 的那把（已自动配置）；其他设备或软件各领一把，丢了就吊销。新 key 的完整内容只显示一次。',
+          'Every model is served from one OpenAI-compatible address: use it as Base URL and any key below as the API key. dsh uses the "dsh" key (configured automatically); give each other device or tool its own key and revoke it if lost. A new key is shown in full only once.')),
+        addrs.length ? h('div', { style: { ...S.card, marginBottom: 10 } }, addrs.map((r, i) => h('div', { key: r.id, style: i ? S.row : S.rowFirst },
+          h('div', { style: S.line },
+            h('span', { style: { ...S.label, width: 72, flex: 'none' } }, r.name),
+            h('code', { style: { ...S.mono, ...S.grow, wordBreak: 'break-all' } }, r.url),
+            h(CopyButton, { get: r.url })),
+          h('div', { style: { ...S.meta, paddingLeft: 82 } }, r.note)))) : null,
         err ? h('div', { style: { fontSize: 12, color: C.err, margin: '0 0 8px' } }, err) : null,
         fresh ? h('div', { style: { ...S.card, padding: 12, marginBottom: 10 } },
           h('div', { style: S.meta }, L(`新 key「${fresh.name}」只显示这一次：`, `New key "${fresh.name}" is shown only once:`)),
           h('div', { style: { ...S.line, marginTop: 6 } }, h('code', { style: { ...S.mono, ...S.grow, wordBreak: 'break-all' } }, fresh.key), h(CopyButton, { get: fresh.key }), h('button', { type: 'button', style: S.btn, onClick: () => setFresh(null) }, L('我已保存', 'Saved')))) : null,
-        h('div', { style: S.card },
+        h('div', { style: { ...S.card, overflowX: 'auto' } },
           h('table', { style: S.table },
-            h('thead', null, h('tr', null, [L('名称', 'Name'), 'Key', L('请求', 'Requests'), L('成功率', 'Success'), L('平均延迟', 'Latency'), 'tokens/s', L('最后使用', 'Last used'), ''].map((t, i) => h('th', { key: i, style: S.th }, t)))),
+            h('thead', null, h('tr', null, [L('名称', 'Name'), 'Key', L('创建时间', 'Created'), L('最近使用', 'Last used'), L('请求(24h)', 'Requests (24h)'), L('成功率', 'Success'), ''].map((t, i) => h('th', { key: i, style: S.th }, t)))),
             h('tbody', null, keys.map((k) => {
               const st = k.stats?.d1
               return h('tr', { key: k.name },
                 h('td', { style: S.td }, k.name),
                 h('td', { style: { ...S.td, ...S.mono } }, k.key),
+                h('td', { style: S.td }, (k.createdAt || '').slice(0, 10)),
+                h('td', { style: S.td }, ago(st?.lastUsedAt)),
                 h('td', { style: S.td }, st ? st.requests : 0),
                 h('td', { style: { ...S.td, color: rateColor(st?.successRate) } }, pct(st?.successRate)),
-                h('td', { style: S.td }, ms(st?.avgLatencyMs)),
-                h('td', { style: S.td }, st?.tokensPerSec ?? '-'),
-                h('td', { style: S.td }, ago(st?.lastUsedAt)),
-                h('td', { style: { ...S.td, textAlign: 'right', whiteSpace: 'nowrap' } },
+                h('td', { style: { ...S.td, textAlign: 'right' } },
                   h(CopyButton, { get: async () => (await api('POST', `/keys/${encodeURIComponent(k.name)}/reveal`)).key, style: { marginRight: 6 } }),
                   h('button', { type: 'button', style: S.btn, onClick: () => rotate(k) }, L('轮换', 'Rotate')),
                   k.name !== 'dsh' ? h('button', { type: 'button', style: { ...S.btn, marginLeft: 6, color: C.err }, onClick: () => revoke(k) }, L('吊销', 'Revoke')) : null))
             })))),
+        info?.foreign ? h('div', { style: { ...S.meta, marginTop: 6 } }, L(`另有 ${info.foreign} 把 key 是在完整管理界面里添加的，在那里管理。`, `${info.foreign} more key(s) were added in the full management interface; manage them there.`)) : null,
         h('div', { style: { ...S.line, marginTop: 10 } },
           h('input', { style: { ...S.input, width: 200 }, placeholder: L('新 key 名称，如 laptop', 'New key name, e.g. laptop'), value: name, onChange: (e) => setName(e.target.value) }),
           h('button', { type: 'button', style: S.btnPrimary, disabled: !name.trim(), onClick: add }, L('新增 key', 'Add key'))))
     }
 
-    function ModelsCard({ stats }) {
-      const rows = Object.entries(stats?.byModel || {}).sort((a, b) => b[1].d1.requests - a[1].d1.requests).slice(0, 30)
-      if (!rows.length) return null
+    // —— 服务（R2 ③）——
+    function ServiceSection({ service, reload }) {
+      const [busy, setBusy] = useState('')
+      const [msg, setMsg] = useState('')
+      if (!service) return null
+      const e = service.engine
+      const restart = async () => {
+        setBusy('restart'); setMsg('')
+        try { const r = await api('POST', '/service/restart'); setMsg(r.running ? L('已重启', 'Restarted') : L('重启后没有起来，查看日志：dsh-cpamc logs', 'Did not come back after restart; check: dsh-cpamc logs')); await reload(true) } catch (x) { setMsg(x.message) } finally { setBusy('') }
+      }
+      const repair = async () => {
+        setBusy('repair'); setMsg('')
+        try {
+          const r = await fetch('/api-dsh-cpamc/setup', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-dsh-cpamc-token': token }, body: JSON.stringify({ action: 'repair', lang: isZh() ? 'zh' : 'en' }) })
+          const j = await r.json().catch(() => ({}))
+          setMsg(j.vps ? L('服务器上请在终端执行：sudo dsh-cpamc repair', 'On the server run: sudo dsh-cpamc repair') : j.code === 0 ? L('修复完成', 'Repaired') : L(`修复没有完成（退出码 ${j.code}）`, `Repair did not finish (exit code ${j.code})`))
+          await reload(true)
+        } catch (x) { setMsg(x.message) } finally { setBusy('') }
+      }
+      const row = (label, value, color) => h('div', { style: { ...S.line, minHeight: 26 } }, h('span', { style: { ...S.meta, width: 110, flex: 'none' } }, label), h('span', { style: { fontSize: 13, color: color || C.text } }, value))
       return h('div', { style: S.section },
-        h('div', { style: S.h }, L('模型统计', 'Models')),
-        h('p', { style: S.note }, L('最近 24 小时经统一端点的请求，按模型。挑模型时参考成功率和速度。', 'Requests through the unified endpoint in the last 24 hours, by model.')),
-        h('div', { style: S.card }, h('table', { style: S.table },
-          h('thead', null, h('tr', null, [L('模型', 'Model'), L('来源', 'Source'), L('请求', 'Requests'), L('成功率', 'Success'), L('平均延迟', 'Latency'), 'tokens/s'].map((t, i) => h('th', { key: i, style: S.th }, t)))),
-          h('tbody', null, rows.map(([m, v]) => h('tr', { key: m },
-            h('td', { style: S.td }, m),
-            h('td', { style: { ...S.td, color: C.sub } }, v.source),
-            h('td', { style: S.td }, v.d1.requests),
-            h('td', { style: { ...S.td, color: rateColor(v.d1.successRate) } }, pct(v.d1.successRate)),
-            h('td', { style: S.td }, ms(v.d1.avgLatencyMs)),
-            h('td', { style: S.td }, v.d1.tokensPerSec ?? '-')))))))
+        h('div', { style: S.h }, L('服务', 'Service')),
+        h('div', { style: { ...S.card, padding: '10px 14px' } },
+          row(L('模型服务', 'Model service'), e.running ? L(`运行中 · 127.0.0.1:${e.port}`, `Running · 127.0.0.1:${e.port}`) : L('没有运行（点「修复」）', 'Not running (press Repair)'), e.running ? C.ok : C.err),
+          row(L('服务版本', 'Service version'), e.version ? `v${e.version}` : '-'),
+          row(L('渠道插件', 'Channel plugins'), service.components.plugins ? `v${service.components.plugins}` : '-'),
+          row(L('完整管理界面', 'Full interface'), service.components.panel ? `v${service.components.panel}` : '-'),
+          service.mode === 'vps' ? row(L('部署位置', 'Deployed on'), L('dsh-vps 服务器', 'dsh-vps server')) : null,
+          service.mode === 'vps' && service.remote.publicUrl ? row(L('外部地址', 'Public address'), service.remote.publicUrl) : null,
+          service.mode === 'vps' ? h('div', { style: { ...S.meta, marginTop: 4 } }, L('服务器账号、密码和域名在「设置 → dsh-vps」里管理。', 'Server account, password and domain are managed under Settings → dsh-vps.')) : null,
+          h('div', { style: { ...S.line, marginTop: 8 } },
+            h('button', { type: 'button', style: S.btn, disabled: Boolean(busy), onClick: () => void reload(true) }, L('重新检查', 'Check again')),
+            service.canRestart ? h('button', { type: 'button', style: S.btn, disabled: Boolean(busy), onClick: restart }, busy === 'restart' ? L('重启中…', 'Restarting…') : L('重启服务', 'Restart service')) : null,
+            h('button', { type: 'button', style: S.btn, disabled: Boolean(busy), onClick: repair }, busy === 'repair' ? L('修复中…', 'Repairing…') : L('修复', 'Repair')),
+            msg ? h('span', { style: S.meta }, msg) : null)))
+    }
+
+    // —— 「全部功能」卡片（R4）——
+    function FullFeaturesCard({ openRef }) {
+      const [res, setRes] = useState(null)
+      const [err, setErr] = useState('')
+      const [busy, setBusy] = useState(false)
+      const open = async () => {
+        setErr('')
+        setBusy(true)
+        // 先同步开一个空窗口（在点击的手势里），拿到地址再跳过去，免得被拦截弹窗
+        let w = null
+        try { w = window.open('about:blank', '_blank') } catch { w = null }
+        try {
+          const r = await api('POST', '/panel/open')
+          setRes(r)
+          if (!r.running) setErr(L('模型服务没有起来，先在「服务」里点「修复」。', 'The model service is not running; press Repair under Service first.'))
+          if (r.url && !r.tunnel && r.running) {
+            if (w) { w.opener = null; w.location.href = r.url } else window.open(r.url, '_blank', 'noopener')
+          } else if (w) w.close()
+        } catch (e) {
+          if (w) w.close()
+          setErr(e.message)
+        } finally {
+          setBusy(false)
+        }
+      }
+      useEffect(() => { if (openRef) openRef.current = open })
+      return h('div', { style: S.section },
+        h('div', { style: { ...S.card, padding: '14px 16px' } },
+          h('div', { style: S.line },
+            h('div', { style: S.grow },
+              h('div', { style: S.label }, L('全部功能', 'All features')),
+              h('div', { style: { ...S.meta, marginTop: 2 } }, L('需要登录来源账号、修改完整配置、调整路由或查看详细日志？打开原版完整管理界面，它管理的就是为 dsh 提供模型的这个服务。',
+                'Need to sign in to sources, change the full configuration, adjust routing or read detailed logs? Open the original full management interface; it manages the very service that provides dsh\'s models.'))),
+            h('button', { type: 'button', style: S.btnPrimary, disabled: busy, onClick: open }, busy ? L('正在打开…', 'Opening…') : L('全部功能', 'All features'))),
+          h('div', { style: { ...S.line, marginTop: 10 } },
+            h('span', { style: { ...S.meta, ...S.grow } }, L('打开后在登录页填入管理密钥：点右边复制（不会显示出来，30 秒后自动从剪贴板清除）。', 'On its sign-in page, paste the management key: copy it with the button on the right (never displayed; cleared from the clipboard after 30 seconds).')),
+            h(CopyButton, { get: async () => (await api('POST', '/panel/key')).key, label: L('复制登录密钥', 'Copy sign-in key'), clearAfter: 30_000 })),
+          res?.vps && res.apiBase && !res.tunnel ? h('div', { style: { ...S.meta, marginTop: 8 } },
+            L('第一次打开时，在登录页勾选「自定义连接地址」，填入：', 'The first time, tick "custom connection address" on the sign-in page and enter:'),
+            h('div', { style: { ...S.line, marginTop: 4 } }, h('code', { style: { ...S.mono, ...S.grow } }, res.apiBase), h(CopyButton, { get: res.apiBase }))) : null,
+          res?.tunnel ? h('div', { style: { ...S.meta, marginTop: 8, lineHeight: 1.7 } },
+            L('这台 dsh-vps 服务器还没有为完整管理界面开通受保护的入口（需要更新 dsh-vps）。现在可以先在你自己的电脑上执行下面的命令，再在本机浏览器打开：', 'This dsh-vps server does not yet provide a protected entry for the full interface (dsh-vps needs an update). For now, run this on your own computer, then open the address in a local browser:'),
+            h('div', { style: { ...S.line, marginTop: 4 } }, h('code', { style: { ...S.mono, ...S.grow } }, res.tunnel), h(CopyButton, { get: res.tunnel })),
+            h('div', { style: { ...S.line, marginTop: 4 } }, h('code', { style: { ...S.mono, ...S.grow } }, res.url), h(CopyButton, { get: res.url }))) : null,
+          err ? h('div', { style: { fontSize: 12, color: C.err, marginTop: 6 } }, err) : null))
     }
 
     /** 守护进程还没装 / 没在运行：说明 + 一键安装（本机）或命令（VPS 上要 root） */
@@ -512,12 +546,7 @@ window.__ModuleLoader__.load({
         setBusy(true)
         setRes(null)
         try {
-          const r = await fetch('/api-dsh-cpamc/setup', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'content-type': 'application/json', 'x-dsh-cpamc-token': token },
-            body: JSON.stringify({ action, lang: isZh() ? 'zh' : 'en' }),
-          })
+          const r = await fetch('/api-dsh-cpamc/setup', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-dsh-cpamc-token': token }, body: JSON.stringify({ action, lang: isZh() ? 'zh' : 'en' }) })
           const j = await r.json().catch(() => ({}))
           if (r.status === 403 && j?.error?.code === 'refused') { await refreshToken(); setBusy(false); return run() }
           setRes(j)
@@ -531,94 +560,23 @@ window.__ModuleLoader__.load({
       const cmds = notInstalled ? ['npm install -g dsh-cpamc', 'dsh-cpamc setup'] : ['dsh-cpamc repair']
       const vpsCmds = notInstalled ? ['sudo npm install -g dsh-cpamc', 'sudo dsh-cpamc setup'] : ['sudo dsh-cpamc repair']
       const cmdBlock = (list) => h('div', { style: { ...S.card, padding: '8px 12px', marginTop: 8 } }, list.map((c) => h('div', { key: c, style: { ...S.line, minHeight: 30 } }, h('code', { style: { ...S.mono, ...S.grow } }, c), h(CopyButton, { get: c }))))
-      return h('div', { style: { color: C.text, maxWidth: 820 } },
-        h('div', { style: S.section },
-          h('div', { style: S.h }, notInstalled ? L('还差一步：在这台机器上装好 dsh-cpamc', 'One more step: set up dsh-cpamc on this machine') : L('dsh-cpamc 的服务没在运行', 'The dsh-cpamc service is not running')),
-          h('p', { style: S.note }, notInstalled
-            ? L('这个页面只是管理界面；模型由 dsh-cpamc 在本机运行的服务提供（统一端点、WorkBuddy bridge、登录与用量）。装好后，来源、key 和模型都在这里管理。', 'This page is only the control panel; models are served by dsh-cpamc\'s local service (the unified endpoint, WorkBuddy bridge, sign-ins and usage). Once it is set up, manage sources, keys and models here.')
-            : L('可能是电脑重启后服务没起来，或者刚升级。修复会按记录重新注册并启动服务。', 'The service may not have started after a reboot, or was just upgraded. Repair re-registers and starts it from the saved records.')),
-          res?.vps ? h('div', null,
-            h('p', { style: { ...S.note, color: C.text } }, L('这是 dsh-vps 服务器：安装要 root 权限，请在服务器终端里执行：', 'This is a dsh-vps server: setup needs root, so run this in a server terminal:')),
-            cmdBlock(vpsCmds),
-            h('p', { style: { ...S.note, marginTop: 8 } }, L('装好后刷新本页。', 'Reload this page when done.'))) : h('div', null,
-            h('div', { style: S.line },
-              h('button', { type: 'button', style: S.btnPrimary, disabled: busy, onClick: run }, busy ? (notInstalled ? L('安装中…（约 1 分钟）', 'Setting up… (about a minute)') : L('修复中…', 'Repairing…')) : (notInstalled ? L('一键安装', 'Set up now') : L('修复', 'Repair'))),
-              h('button', { type: 'button', style: S.btn, onClick: onDone }, L('重新检测', 'Check again'))),
-            h('p', { style: { ...S.note, marginTop: 10 } }, L('也可以在终端里执行：', 'Or run in a terminal:')),
-            cmdBlock(cmds)),
-          res && !res.vps ? h('div', { style: { marginTop: 12 } },
-            h('div', { style: { fontSize: 12, color: res.code === 0 ? C.ok : C.err, marginBottom: 6 } }, res.code === 0 ? L('完成，正在加载…', 'Done, loading…') : L(`没有完成（退出码 ${res.code}），输出如下：`, `Did not finish (exit code ${res.code}); output:`)),
-            h('pre', { style: { ...S.mono, ...S.card, padding: 10, maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 } }, res.output || '')) : null))
-    }
-
-    const newer = (a, b) => {
-      const pa = String(a || '').split(/[.-]/).map((x) => parseInt(x, 10) || 0)
-      const pb = String(b || '').split(/[.-]/).map((x) => parseInt(x, 10) || 0)
-      for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0)
-      return false
-    }
-
-    /** 版本、更新、卸载 */
-    function AboutCard({ onJob }) {
-      const [info, setInfo] = useState(null)
-      const [confirming, setConfirming] = useState(false)
-      const [keepAuth, setKeepAuth] = useState(false)
-      const [err, setErr] = useState('')
-      const [starting, setStarting] = useState(false)
-      useEffect(() => {
-        let alive = true
-        // 服务比页面旧（没有 /self）：也要给出办法，不能整块不显示
-        api('GET', '/self').then((r) => alive && setInfo(r), (e) => alive && setInfo({ old: e.code === 'not_found' }))
-        return () => { alive = false }
-      }, [])
-      if (!info) return null
-      if (!info.version) {
-        const cmd = 'npm install -g dsh-cpamc && dsh-cpamc setup'
-        return h('div', { style: S.section },
-          h('div', { style: S.h }, L('关于', 'About')),
-          h('div', { style: { ...S.card, padding: '12px 14px' } },
-            h('div', { style: S.meta }, info.old
-              ? L('这台机器上的 dsh-cpamc 服务比这个页面旧，不支持在页面上更新。在终端执行一次（服务器上加 sudo），之后就能在这里更新和卸载：', 'The dsh-cpamc service on this machine is older than this page and cannot update from here. Run this once in a terminal (with sudo on a server); after that you can update and uninstall here:')
-              : L('暂时查不到版本信息。可以在终端执行（服务器上加 sudo）：', 'Version info is unavailable right now. You can run in a terminal (with sudo on a server):')),
-            h('div', { style: { ...S.line, minHeight: 30, marginTop: 6 } }, h('code', { style: { ...S.mono, ...S.grow } }, cmd), h(CopyButton, { get: cmd }))))
-      }
-      const hasUpdate = info.latest && newer(info.latest, info.version)
-      const start = async (action) => {
-        if (starting) return
-        setErr('')
-        setStarting(true)
-        try {
-          await api('POST', `/self/${action}`, action === 'uninstall' ? { keepAuth } : {})
-          onJob({ action, from: info.version, target: info.latest })
-        } catch (e) {
-          // 连不上守护进程多半是它已经开始重启（任务已经在跑）：照样进进度页，等它回来
-          if (e.code === 'daemon_unreachable') onJob({ action, from: info.version, target: info.latest })
-          else setErr(e.message)
-        } finally {
-          setStarting(false)
-        }
-      }
       return h('div', { style: S.section },
-        h('div', { style: S.h }, L('关于', 'About')),
-        h('div', { style: { ...S.card, padding: '12px 14px' } },
+        h('div', { style: S.h }, notInstalled ? L('还差一步：准备模型服务', 'One more step: prepare the model service') : L('模型服务没在运行', 'The model service is not running')),
+        h('p', { style: S.note }, notInstalled
+          ? L('这一步会下载并校验模型服务、四个 IDE 来源的组件和完整管理界面，生成配置与 API Key，启动服务并接进 dsh。之后在这里管理来源、模型和 key。', 'This downloads and verifies the model service, the components for the four IDE sources and the full management interface, generates config and API keys, starts the service and wires it into dsh. After that, manage sources, models and keys here.')
+          : L('可能是电脑重启后服务没起来，或者刚升级。修复会按记录重新注册并启动服务。', 'The service may not have started after a reboot, or was just upgraded. Repair re-registers and starts it from the saved records.')),
+        res?.vps ? h('div', null,
+          h('p', { style: { ...S.note, color: C.text } }, L('这是 dsh-vps 服务器：这一步要 root 权限，请在服务器终端里执行：', 'This is a dsh-vps server: this needs root, so run in a server terminal:')),
+          cmdBlock(vpsCmds),
+          h('p', { style: { ...S.note, marginTop: 8 } }, L('完成后刷新本页。', 'Reload this page when done.'))) : h('div', null,
           h('div', { style: S.line },
-            h('span', { style: { ...S.label, ...S.grow } }, `dsh-cpamc ${info.version}`,
-              h('span', { style: { ...S.meta, marginLeft: 8 } }, info.latest ? (hasUpdate ? L(`有新版本 ${info.latest}`, `${info.latest} available`) : L('已是最新', 'Up to date')) : L('查不到最新版本', 'Latest version unknown'))),
-            info.canManage && hasUpdate ? h('button', { type: 'button', style: S.btnPrimary, disabled: starting, onClick: () => void start('update') }, starting ? L('正在开始…', 'Starting…') : L(`更新到 ${info.latest}`, `Update to ${info.latest}`)) : null,
-            info.canManage ? h('button', { type: 'button', style: { ...S.btn, color: C.err }, onClick: () => setConfirming(true) }, L('卸载', 'Uninstall')) : null),
-          !info.canManage ? h('div', { style: { marginTop: 8 } },
-            h('div', { style: S.meta }, L('服务器上更新和卸载要 root 权限，请在服务器终端里执行：', 'On the server, update and uninstall need root; run in a server terminal:')),
-            [[L('更新', 'Update'), info.commands.update], [L('卸载', 'Uninstall'), info.commands.uninstall]].map(([t, c]) => h('div', { key: c, style: { ...S.line, minHeight: 30 } },
-              h('span', { style: { ...S.meta, width: 40 } }, t), h('code', { style: { ...S.mono, ...S.grow } }, c), h(CopyButton, { get: c })))) : null,
-          confirming ? h('div', { style: { marginTop: 10, padding: 10, border: `1px solid ${C.err}`, borderRadius: 8 } },
-            h('div', { style: { fontSize: 13, color: C.text, lineHeight: 1.7 } }, L('卸载会：关闭对外访问 → 移除这个管理页 → 把 dsh 里的模型配置还原 → 停止并删除引擎与守护进程 → 删除 ~/.dsh-cpamc（含各家登录、OpenCode key、WorkBuddy 令牌副本）。', 'Uninstall will: turn off remote access → remove this page → restore dsh\'s model config → stop and delete the engine and daemon → delete ~/.dsh-cpamc (including sign-ins, the OpenCode key and WorkBuddy token copies).')),
-            h('label', { style: { ...S.line, fontSize: 13, marginTop: 6, cursor: 'pointer' } },
-              h('input', { type: 'checkbox', checked: keepAuth, onChange: (e) => setKeepAuth(e.target.checked) }),
-              L('先把各家登录凭据备份到主目录（以后重装可以拷回来）', 'Back up provider sign-ins to the home folder first (to reuse after reinstalling)')),
-            h('div', { style: { ...S.line, marginTop: 8 } },
-              h('button', { type: 'button', style: { ...S.btnPrimary, background: C.err }, disabled: starting, onClick: () => void start('uninstall') }, starting ? L('正在开始…', 'Starting…') : L('确认卸载', 'Uninstall')),
-              h('button', { type: 'button', style: S.btn, onClick: () => setConfirming(false) }, L('取消', 'Cancel')))) : null,
-          err ? h('div', { style: { fontSize: 12, color: C.err, marginTop: 6 } }, err) : null))
+            h('button', { type: 'button', style: S.btnPrimary, disabled: busy, onClick: run }, busy ? (notInstalled ? L('准备中…（约 1 分钟）', 'Preparing… (about a minute)') : L('修复中…', 'Repairing…')) : (notInstalled ? L('一键准备', 'Prepare now') : L('修复', 'Repair'))),
+            h('button', { type: 'button', style: S.btn, onClick: onDone }, L('重新检测', 'Check again'))),
+          h('p', { style: { ...S.note, marginTop: 10 } }, L('也可以在终端里执行：', 'Or run in a terminal:')),
+          cmdBlock(cmds)),
+        res && !res.vps ? h('div', { style: { marginTop: 12 } },
+          h('div', { style: { fontSize: 12, color: res.code === 0 ? C.ok : C.err, marginBottom: 6 } }, res.code === 0 ? L('完成，正在加载…', 'Done, loading…') : L(`没有完成（退出码 ${res.code}），输出如下：`, `Did not finish (exit code ${res.code}); output:`)),
+          h('pre', { style: { ...S.mono, ...S.card, padding: 10, maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 } }, res.output || '')) : null)
     }
 
     /** 更新 / 卸载进行中：守护进程会重启或消失，期间不显示别的 */
@@ -643,30 +601,35 @@ window.__ModuleLoader__.load({
       const upd = job.action === 'update'
       const title = state.phase === 'done'
         ? (upd ? L('更新完成', 'Update complete') : L('已卸载', 'Uninstalled'))
-        : (upd ? L(`正在更新到 ${job.target}…（服务会重启一下）`, `Updating to ${job.target}… (the service restarts briefly)`) : L('正在卸载…', 'Uninstalling…'))
-      return h('div', { style: { color: C.text, maxWidth: 820 } },
-        h('div', { style: S.section },
-          h('div', { style: S.h }, title),
-          state.phase === 'done' ? h('p', { style: { ...S.note, color: C.text } }, upd
-            ? L('完全退出 dsh 再打开一次，管理页的新代码才会生效。', 'Quit dsh completely and open it again so the management page loads the new code.')
-            : L('dsh 里的 dsh-cpamc 模型已移除。完全退出 dsh 再打开，这一页就会消失。日志在主目录的 dsh-cpamc-uninstall.log。', 'dsh-cpamc\'s models are gone from dsh. Quit dsh completely and reopen it and this page disappears. The log is ~/dsh-cpamc-uninstall.log.')) : null,
-          state.log ? h('pre', { style: { ...S.mono, ...S.card, padding: 10, maxHeight: 300, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 } }, state.log) : null,
-          state.phase === 'done' && upd ? h('button', { type: 'button', style: { ...S.btn, marginTop: 10 }, onClick: onDone }, L('返回', 'Back')) : null))
+        : (upd ? L(`正在更新到 v${job.target}…（服务会重启一下）`, `Updating to v${job.target}… (the service restarts briefly)`) : L('正在卸载…', 'Uninstalling…'))
+      return h('div', { style: S.section },
+        h('div', { style: S.h }, title),
+        state.phase === 'done' ? h('p', { style: { ...S.note, color: C.text } }, upd
+          ? L('完全退出 dsh 再打开一次，设置页的新代码才会生效。', 'Quit dsh completely and open it again so the settings page loads the new code.')
+          : L('服务已停止、端口已释放，dsh 里的 dsh-cpamc 模型已移除。完全退出 dsh 再打开，这一页就会消失。日志在主目录的 dsh-cpamc-uninstall.log。', 'Services are stopped, ports are free and dsh-cpamc\'s models are gone from dsh. Quit dsh completely and reopen it and this page disappears. The log is ~/dsh-cpamc-uninstall.log.')) : null,
+        state.log ? h('pre', { style: { ...S.mono, ...S.card, padding: 10, maxHeight: 300, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 } }, state.log) : null,
+        state.phase === 'done' && upd ? h('button', { type: 'button', style: { ...S.btn, marginTop: 10 }, onClick: onDone }, L('返回', 'Back')) : null)
     }
 
     // —— 整页 ——
     function SettingsSection() {
       const [data, setData] = useState(null)
+      const [self, setSelf] = useState(null)
       const [err, setErr] = useState('')
       const [errCode, setErrCode] = useState('')
       const [selfJob, setSelfJob] = useState(null)
-      const [login, setLogin] = useState(null)
-      const [keyDialog, setKeyDialog] = useState(false)
       const alive = useRef(true)
+      const openPanel = useRef(null)
       const load = useCallback(async (refresh) => {
         try {
-          const [sources, keys, stats, endpoints] = await Promise.all([api('GET', refresh ? '/sources?refresh=1' : '/sources'), api('GET', '/keys'), api('GET', '/stats'), api('GET', '/endpoints').catch(() => null)])
-          if (alive.current) { setData({ sources, keys, stats, endpoints }); setErr(''); setErrCode('') }
+          const [sources, keys, stats, endpoints, service] = await Promise.all([
+            api('GET', refresh ? '/sources?refresh=1' : '/sources'),
+            api('GET', '/keys-info'),
+            api('GET', '/stats'),
+            api('GET', '/endpoints').catch(() => null),
+            api('GET', '/service').catch(() => null),
+          ])
+          if (alive.current) { setData({ sources, keys, stats, endpoints, service }); setErr(''); setErrCode('') }
         } catch (e) {
           if (alive.current) { setErr(e.hint ? `${e.message}（${e.hint}）` : e.message); setErrCode(e.code || '') }
         }
@@ -674,23 +637,25 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         alive.current = true
         void load(true)
+        api('GET', '/self').then((r) => alive.current && setSelf(r), () => {})
         const t = setInterval(() => void load(false), 15000)
         return () => { alive.current = false; clearInterval(t) }
       }, [load])
-      if (!data) return h('div', { style: { fontSize: 13, color: err ? C.err : C.sub, padding: '8px 0' } }, err || L('加载中…', 'Loading…'))
-      return h('div', { style: { color: C.text, maxWidth: 820 } },
-        err ? h('div', { style: { fontSize: 12, color: C.err, marginBottom: 12 } }, err) : null,
-        h(EndpointCard, { endpoints: data.endpoints }),
-        h(SourcesCard, { sources: data.sources, reload: () => load(false), onLogin: (s, session) => setLogin({ source: s, session }), onKey: () => setKeyDialog(true) }),
-        h(KeysCard, { keys: data.keys, reload: () => load(false) }),
-        h(ModelsCard, { stats: data.stats }),
-        h(AboutCard, { onJob: setSelfJob }),
-        login ? h(LoginDialog, { source: login.source, session: login.session, onDone: () => { setLogin(null); void load(true) }, onClose: () => { setLogin(null); void load(false) } }) : null,
-        keyDialog ? h(KeyDialog, { onDone: () => { setKeyDialog(false); void load(true) }, onClose: () => setKeyDialog(false) }) : null)
+      const page = (children) => h('div', { style: { color: C.text, maxWidth: 860 } }, h(Header, { self, onJob: setSelfJob }), children)
+      if (selfJob) return page(h(SelfProgress, { job: selfJob, onDone: () => { setSelfJob(null); void load(true) } }))
+      if (errCode === 'daemon_not_configured' || errCode === 'daemon_unreachable') return page(h(Onboarding, { code: errCode, onDone: () => void load(true) }))
+      if (!data) return page(h('div', { style: { fontSize: 13, color: err ? C.err : C.sub, padding: '8px 0' } }, err || L('加载中…', 'Loading…')))
+      return page([
+        err ? h('div', { key: 'err', style: { fontSize: 12, color: C.err, marginBottom: 12 } }, err) : null,
+        h(ModelsSection, { key: 'models', sources: data.sources, stats: data.stats, reload: () => load(false), openPanel: () => openPanel.current?.() }),
+        h(KeysSection, { key: 'keys', info: data.keys, endpoints: data.endpoints, reload: () => load(false) }),
+        h(ServiceSection, { key: 'service', service: data.service, reload: load }),
+        h(FullFeaturesCard, { key: 'full', openRef: openPanel }),
+      ])
     }
 
     const name = 'dsh-cpamc'
-    // 用到的服务必须先声明，否则 ctx.slots 读不到（实测：cannot get property "slots" without inject）
+    // 用到的服务必须先声明，否则 ctx.slots 读不到
     const inject = ['slots']
     function apply(ctx) {
       try {
@@ -701,7 +666,7 @@ window.__ModuleLoader__.load({
       }
     }
 
-    module.exports = { name, inject, apply, __test: { until, pct, ms } }
+    module.exports = { name, inject, apply, __test: { until, pct, ms, statusOf, newer, Header, ModelsSection, KeysSection, ServiceSection, FullFeaturesCard, Onboarding, SelfProgress, SettingsSection } }
     return module.exports
   },
 })

@@ -53,10 +53,13 @@ describe('dsh plugin host side', () => {
     try {
       expect((await call({ method: 'GET', path: '/sources' })).status).toBe(200)
       expect(seen.at(-1)).toMatchObject({ auth: 'Bearer daemon-secret', path: '/control/sources', method: 'GET' })
-      expect((await call({ method: 'POST', path: '/sources/kimi/enable', body: {} })).status).toBe(200)
-      // 白名单外
+      expect((await call({ method: 'POST', path: '/sources/trae/hide', body: {} })).status).toBe(200)
+      expect((await call({ method: 'POST', path: '/panel/open', body: {} })).status).toBe(200)
+      // 白名单外：命令行登录、退出登录不对页面开放（登录在完整管理界面里做）
+      expect((await call({ method: 'POST', path: '/sources/trae/logout', body: {} })).status).toBe(403)
+      expect((await call({ method: 'POST', path: '/sources/trae/login', body: {} })).status).toBe(403)
       expect((await call({ method: 'GET', path: '/../../etc' })).status).toBe(403)
-      expect((await call({ method: 'POST', path: '/opencode/../keys' })).status).toBe(403)
+      expect((await call({ method: 'POST', path: '/panel/../keys' })).status).toBe(403)
       // 没令牌 / 跨站
       expect((await call({ method: 'GET', path: '/sources' }, { 'x-dsh-cpamc-token': 'nope' })).status).toBe(403)
       expect((await call({ method: 'GET', path: '/sources' }, { origin: 'https://evil.example' })).status).toBe(403)

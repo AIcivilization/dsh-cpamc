@@ -19,15 +19,20 @@ import { which } from '../util/exec.js'
 import { spawnDetached } from '../util/detach.js'
 import { PKG_ROOT, pkgVersion } from '../util/pkg.js'
 import { randomBytes } from 'node:crypto'
-import { currentBinary } from '../engine/install.js'
 import type { Ctx } from '../context.js'
 import { tightenAuthPerms } from '../engine/auth.js'
-import { Mgmt, type CredentialEntry } from '../engine/mgmt.js'
+import { Mgmt, loadMgmt, type CredentialEntry } from '../engine/mgmt.js'
+import { engineApiKeys } from '../engine/config.js'
+import { healthy, waitHealthy } from '../engine/client.js'
+import { currentBinary, currentVersion } from '../engine/install.js'
+import { serviceFor, type ServiceStatus } from '../service/index.js'
+import { loadBridgeConfig } from './runtime.js'
+import YAML from 'yaml'
 import { DshModelError, isDshModelError } from '../errors.js'
 import { L } from '../i18n.js'
 import { DSH_KEY_NAME, addKey, loadKeys, revokeKey, rotateKey, saveKeys } from '../keys.js'
-import { applyEngineConfig, dshCandidates, dshKey, loadAll, saveAll, syncAll } from '../ops.js'
-import { defaultPick, pickedFor } from '../dsh/pick.js'
+import { applyEngineConfig, defaultSelection, dshCandidates, dshKey, loadAll, saveAll, syncAll } from '../ops.js'
+import { isChatModel, pickedFor } from '../dsh/pick.js'
 import { SOURCES, credsFor, findSource, paymentRequired, type SourceDef } from '../sources.js'
 import { withLock } from '../state.js'
 import { riskNotice as upstreamRiskNotice } from '../upstreams.js'
@@ -296,11 +301,13 @@ export class Daemon {
   }
 
   private async doRefreshUsage(): Promise<void> {
-    const before = [...this.usageCache.values()].filter((u) => u.noAccess).map((u) => u.source).sort().join(',')
+    // 影响 dsh 模型清单的两件事：有没有可用额度、实测调通的是哪个模型（默认显示的就是它）
+    const sig = () => [...this.usageCache.values()].map((u) => `${u.source}:${u.noAccess ? 0 : 1}:${u.probedModel ?? ''}`).sort().join(',')
+    const before = sig()
     await this.doRefreshUsageInner()
     await writeJson(usageFilePath(this.ctx.paths.home), [...this.usageCache.values()], { owner: this.ctx.owner }).catch(() => {})
-    const after = [...this.usageCache.values()].filter((u) => u.noAccess).map((u) => u.source).sort().join(',')
-    // 某个来源"有没有可用额度"变了：重新同步，dsh 里相应地隐藏 / 恢复它的模型
+    const after = sig()
+    // 变了：重新同步，dsh 里相应地隐藏 / 恢复 / 默认显示它的模型
     if (before !== after) void this.resync()
   }
 
@@ -353,11 +360,12 @@ export class Daemon {
         log(`daemon: probe ${def.id} → denied (engine cooldown: payment_required)`)
         return
       }
-      const model = def.probeModel ?? (await (await this.mgmt()).credentialModels(cred.name))[0]?.id
+      // 挑一个对话模型实测（跳过画图、向量这类）
+      const model = def.probeModel ?? (await (await this.mgmt()).credentialModels(cred.name)).map((m) => m.id).find(isChatModel)
       if (!model) return
       const all = await loadAll(this.ctx)
       const r = await probeEngineSource(all.config.port, dshKey(all.keys), model)
-      this.usageCache.set(s.id, { source: s.id, windows: [], fetchedAt, unsupported: true, ...(r.ok ? {} : { noAccess: true, plan: 'none', error: r.reason }) })
+      this.usageCache.set(s.id, { source: s.id, windows: [], fetchedAt, unsupported: true, ...(r.ok ? { probedModel: model } : { noAccess: true, plan: 'none', error: r.reason }) })
       log(`daemon: probe ${def.id} (${model}) → ${r.ok ? 'ok' : `denied: ${r.reason}`}`)
     } catch (error) {
       // 网络 / 限流：不下结论，下一轮再试
@@ -534,6 +542,10 @@ export class Daemon {
 
   // —— key ——
 
+  async keysInfo(): Promise<{ keys: Awaited<ReturnType<Daemon['keys']>>; foreign: number }> {
+    return { keys: await this.keys(), foreign: await this.foreignKeyCount() }
+  }
+
   async keys(): Promise<{ name: string; key: string; createdAt: string; stats?: StatsSnapshot['byKey'][string] }[]> {
     const store = await loadKeys(this.ctx)
     const snap = this.stats.snapshot()
@@ -599,16 +611,16 @@ export class Daemon {
     return { started: true, log }
   }
 
-  /** 这个来源的全部模型，以及哪些显示在 dsh 里 */
+  /** 这个来源的全部模型，以及哪些显示在 dsh 里；recommended = 全局默认里的那个（实测调通的免费模型） */
   async sourceModels(id: string): Promise<{ custom: boolean; models: { id: string; name: string; selected: boolean; recommended: boolean }[] }> {
     const def = mustSource(id)
     const all = await loadAll(this.ctx)
-    const c = (await dshCandidates(this.ctx, all)).get(def.id)
-    const list = (c?.models ?? []).map((m) => ({ id: m.id, name: m.name, rate: m.rate }))
+    const candidates = await dshCandidates(this.ctx, all)
+    const list = candidates.get(def.id)?.models ?? []
+    const rec = (await defaultSelection(this.ctx, candidates)).get(def.id) ?? []
     const chosen = all.config.dshModels?.[def.id]
-    const picked = new Set(pickedFor(list, chosen))
-    const rec = new Set(defaultPick(list))
-    return { custom: chosen !== undefined, models: list.map((m) => ({ id: m.id, name: m.name, selected: picked.has(m.id), recommended: rec.has(m.id) })) }
+    const picked = new Set(pickedFor(list.map((m) => m.id), chosen, rec))
+    return { custom: chosen !== undefined, models: list.map((m) => ({ id: m.id, name: m.name, selected: picked.has(m.id), recommended: rec.includes(m.id) })) }
   }
 
   /** 保存勾选；null = 恢复默认挑选 */
@@ -682,6 +694,79 @@ export class Daemon {
     return { name, key: entry.key }
   }
 
+  // —— 服务与「全部功能」——
+
+  /** 服务区块：引擎、渠道插件、管理界面、守护进程的状态（R2 ③） */
+  async serviceInfo(): Promise<{
+    mode: 'local' | 'vps'
+    engine: { running: boolean; port: number; version: string | null; service: ServiceStatus | null }
+    components: { plugins: string | null; panel: string | null }
+    daemon: { port: number | null }
+    remote: { publicUrl?: string; host?: string }
+    canRestart: boolean
+  }> {
+    const all = await loadAll(this.ctx)
+    const svc = this.ctx.serviceDisabled ? null : await serviceFor(this.ctx).status().catch(() => null)
+    const bridge = await loadBridgeConfig(this.ctx.paths.home)
+    const pub = all.state.remote?.mode === 'caddy' ? all.state.remote.publicUrl : undefined
+    return {
+      mode: this.ctx.mode,
+      engine: { running: await healthy(all.config.port), port: all.config.port, version: await currentVersion(this.ctx), service: svc },
+      components: { plugins: all.state.components?.plugins ?? null, panel: all.state.components?.panel ?? null },
+      daemon: { port: bridge?.port ?? null },
+      remote: { ...(pub ? { publicUrl: pub } : {}), ...(all.config.remote.domain ? { host: all.config.remote.domain } : {}) },
+      // VPS 上引擎是系统服务，守护进程以 dsh 用户运行，没有权限重启它
+      canRestart: this.ctx.mode !== 'vps' && !this.ctx.serviceDisabled,
+    }
+  }
+
+  async restartEngine(): Promise<{ running: boolean }> {
+    if (this.ctx.mode === 'vps') throw new DshModelError('needs_root', L('服务器上重启引擎要 root：在终端执行 sudo dsh-cpamc service restart', 'Restarting the engine on a server needs root: run sudo dsh-cpamc service restart'))
+    const all = await loadAll(this.ctx)
+    await serviceFor(this.ctx).restart()
+    const running = await waitHealthy(all.config.port, 15_000)
+    if (running) void this.resync()
+    return { running }
+  }
+
+  /**
+   * 「全部功能」：确保引擎在跑，返回原版管理界面的地址（设计 §5.4、§7）。
+   * 本机：http://127.0.0.1:<端口>/management.html。VPS：经 dsh-vps 的登录门（/cpamc/）；登录门还不支持时给出 SSH 隧道的办法。
+   */
+  async panelOpen(): Promise<{ url?: string; apiBase?: string; vps: boolean; tunnel?: string; running: boolean }> {
+    const all = await loadAll(this.ctx)
+    let running = await healthy(all.config.port)
+    if (!running && this.ctx.mode !== 'vps' && !this.ctx.serviceDisabled) {
+      await serviceFor(this.ctx).start().catch(() => {})
+      running = await waitHealthy(all.config.port, 15_000)
+    }
+    const local = `http://127.0.0.1:${all.config.port}`
+    if (this.ctx.mode !== 'vps') return { url: `${local}/management.html`, apiBase: local, vps: false, running }
+    const gate = all.state.gateRoute
+    if (gate?.origin) return { url: `${gate.origin}${gate.prefix}/management.html`, apiBase: `${gate.origin}${gate.prefix}`, vps: true, running }
+    const host = all.config.remote.domain ?? L('<服务器地址>', '<server>')
+    return { vps: true, running, tunnel: `ssh -N -L ${all.config.port}:127.0.0.1:${all.config.port} root@${host}`, apiBase: local, url: `${local}/management.html` }
+  }
+
+  /** 原版管理界面的登录密钥（只经同源、带页面 token、过了 dsh 登录的插件路由；设计 §7.3） */
+  async panelKey(): Promise<{ key: string }> {
+    const m = await loadMgmt(this.ctx)
+    if (!m?.secret) throw new DshModelError('mgmt_not_configured', L('管理密钥还没生成（dsh-cpamc setup）', 'Management key not generated yet (dsh-cpamc setup)'))
+    return { key: m.secret }
+  }
+
+  /** 引擎里不是 keys.json 发的 key（在完整管理界面里加的）的个数 */
+  private async foreignKeyCount(): Promise<number> {
+    try {
+      const text = await readFile(this.ctx.paths.engineYaml, 'utf8')
+      const store = await loadKeys(this.ctx)
+      const ours = new Set(store.keys.map((k) => k.key))
+      return engineApiKeys(YAML.parseDocument(text)).filter((k) => !ours.has(k)).length
+    } catch {
+      return 0
+    }
+  }
+
   // —— /control/* 路由 ——
 
   async handle(method: string, path: string, body: unknown, query: URLSearchParams): Promise<{ status: number; body: unknown }> {
@@ -724,6 +809,11 @@ export class Daemon {
         if (method === 'POST' && seg[2] === 'reveal') return ok(await this.revealKey(seg[1]))
       }
       if (method === 'GET' && path === '/stats') return ok(this.statsSnapshot())
+      if (method === 'GET' && path === '/keys-info') return ok(await this.keysInfo())
+      if (method === 'GET' && path === '/service') return ok(await this.serviceInfo())
+      if (method === 'POST' && path === '/service/restart') return ok(await this.restartEngine())
+      if (method === 'POST' && path === '/panel/open') return ok(await this.panelOpen())
+      if (method === 'POST' && path === '/panel/key') return ok(await this.panelKey())
       if (method === 'GET' && path === '/endpoints') return ok(await this.endpoints())
       if (method === 'GET' && path === '/self') return ok(await this.selfInfo())
       if (method === 'POST' && path === '/self/update') return ok(await this.startSelfJob('update'))

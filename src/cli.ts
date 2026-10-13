@@ -13,6 +13,7 @@ import { uninstall } from './commands/uninstall.js'
 import { adminRun, selfUpdate } from './commands/self.js'
 import { supervise } from './service/windows.js'
 import { bridge } from './commands/bridge.js'
+import { panel } from './commands/panel.js'
 import { loginInteractive, source, sources, stats } from './commands/sources.js'
 import { createContext } from './context.js'
 import { isDshModelError } from './errors.js'
@@ -45,6 +46,7 @@ const OPTIONS = {
   'skip-dsh-plugin': { type: 'boolean' },
   to: { type: 'string' },
   'remove-plugin': { type: 'boolean' },
+  'show-key': { type: 'boolean' },
 } as const
 
 function help(): string {
@@ -59,7 +61,7 @@ function help(): string {
   source show|hide <来源>               在 dsh 里显示 / 隐藏这个来源的模型（不改引擎里的设置）
   login <来源> [--accept-risk] / logout <来源>
                                        命令行登录 / 退出登录（平时请在「全部功能」里登录）
-  panel                                打印完整管理界面的地址，并复制登录密钥
+  panel [--show-key]                   打印完整管理界面的地址（--show-key 同时打印登录密钥）
   stats                                按 key / 来源 / 模型的成功率、延迟、速度
   status                               一屏总览
   doctor [--e2e] [--all] [--model M]   逐项自检；--e2e 实测流式与工具调用
@@ -88,7 +90,7 @@ Usage: dsh-cpamc <command> [options]
   source show|hide <source>            Show / hide this source's models in dsh (engine settings are not touched)
   login <source> [--accept-risk] / logout <source>
                                        Sign in / out from the command line (normally sign in under All features)
-  panel                                Print the full management interface address and copy its sign-in key
+  panel [--show-key]                   Print the full management interface address (--show-key also prints its sign-in key)
   stats                                Success rate, latency and speed by key / source / model
   status                               Overview
   doctor [--e2e] [--all] [--model M]   Health checks; --e2e tests streaming and tool calls
@@ -147,6 +149,8 @@ export async function main(argv: string[]): Promise<number> {
       case 'logout':
         if (!a1) throw new Error(L('用法：dsh-cpamc logout <来源>', 'Usage: dsh-cpamc logout <source>'))
         return await source(ctx, 'logout', a1, {})
+      case 'panel':
+        return await panel(ctx, { showKey: o['show-key'] })
       case 'sources':
         return await sources(ctx, { all: o.all })
       case 'source':

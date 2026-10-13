@@ -38,6 +38,8 @@ export interface StatsSnapshot {
   byKey: Record<string, { h1: WindowStats; d1: WindowStats }>
   bySource: Record<string, { h1: WindowStats; d1: WindowStats }>
   byModel: Record<string, { source: string; h1: WindowStats; d1: WindowStats }>
+  /** dsh 最近一次成功请求用的模型（dsh 没有提供"当前会话选的是哪个"的接口，面板标成「最近使用」） */
+  lastOk: { model: string; source: string; at: string } | null
 }
 
 function summarize(recs: Rec[]): WindowStats {
@@ -147,6 +149,14 @@ export class Stats {
     for (const [k, rs] of group((r) => r.p)) bySource[k] = win(rs)
     const byModel: StatsSnapshot['byModel'] = {}
     for (const [k, rs] of group((r) => r.m)) byModel[k] = { source: rs[0]!.p, ...win(rs) }
-    return { updatedAt: new Date(now).toISOString(), byKey, bySource, byModel }
+    let lastOk: StatsSnapshot['lastOk'] = null
+    for (let i = this.recs.length - 1; i >= 0; i--) {
+      const r = this.recs[i]!
+      if (!r.f && r.k === 'dsh') {
+        lastOk = { model: r.m, source: r.p, at: new Date(r.t).toISOString() }
+        break
+      }
+    }
+    return { updatedAt: new Date(now).toISOString(), byKey, bySource, byModel, lastOk }
   }
 }

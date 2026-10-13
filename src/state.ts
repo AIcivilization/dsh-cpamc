@@ -77,6 +77,8 @@ export interface State {
   engine: { versions: string[]; previous?: string }
   /** 上次写进 engine.yaml 的、dsh-cpamc 拥有的值：key 只存哈希，用来认出在完整管理界面里删掉的 key（设计 §6） */
   engineOwned?: { keys: string[]; proxy?: string | null; aliases?: import('./engine/alias.js').AliasEntry[] }
+  /** VPS：原版管理界面在 dsh-vps 登录门后面的入口（origin 来自 dsh-vps，prefix 如 /cpamc） */
+  gateRoute?: { origin: string; prefix: string; file: string }
   /** 已装的渠道插件包与管理界面版本 */
   components?: { plugins?: string; panel?: string }
 }

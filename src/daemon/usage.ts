@@ -34,6 +34,8 @@ export interface SourceUsage {
   unsupported?: boolean
   /** 已登录但当前账号没有可用订阅（模型调用会被拒）：dsh 里隐藏它的模型 */
   noAccess?: boolean
+  /** 实测调通的模型（查不了用量的来源才有）：默认显示进 dsh 的就是它（设计 §4.2） */
+  probedModel?: string
 }
 
 const TIMEOUT_MS = 15_000
