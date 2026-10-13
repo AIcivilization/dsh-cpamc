@@ -18,7 +18,7 @@ export async function ensureDaemon(ctx: Ctx, all: All, opts: { restart?: boolean
   all.config.bridge = { ...all.config.bridge, port }
   const cfg = await ensureBridgeConfig(ctx.paths.home, port, ctx.owner)
   if (ctx.serviceDisabled) {
-    skip(L('已跳过守护进程服务（DSH_MODEL_SERVICE=none）', 'Skipped daemon service (DSH_MODEL_SERVICE=none)'))
+    skip(L('已跳过守护进程服务（DSH_CPAMC_SERVICE=none）', 'Skipped daemon service (DSH_CPAMC_SERVICE=none)'))
     return
   }
   const svc = serviceFor(ctx, 'bridge', all.config.proxy)
@@ -28,7 +28,7 @@ export async function ensureDaemon(ctx: Ctx, all: All, opts: { restart?: boolean
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline && !(await bridgeHealthy(cfg.port, cfg.secret))) await new Promise((r) => setTimeout(r, 300))
   if (!(await bridgeHealthy(cfg.port, cfg.secret))) {
-    throw new DshModelError('daemon_unhealthy', L(`守护进程没有在 127.0.0.1:${cfg.port} 上启动`, `Daemon did not come up on 127.0.0.1:${cfg.port}`), L('查看日志：dsh-model logs --bridge', 'Check logs: dsh-model logs --bridge'))
+    throw new DshModelError('daemon_unhealthy', L(`守护进程没有在 127.0.0.1:${cfg.port} 上启动`, `Daemon did not come up on 127.0.0.1:${cfg.port}`), L('查看日志：dsh-cpamc logs --bridge', 'Check logs: dsh-cpamc logs --bridge'))
   }
   ok(L(`守护进程已在 127.0.0.1:${cfg.port} 运行（来源开关、登录、统计）`, `Daemon running on 127.0.0.1:${cfg.port} (sources, logins, stats)`))
 }

@@ -1,4 +1,4 @@
-// commands/opencode.ts — dsh-model opencode [status|key|remove]，以及 setup 里的 OpenCode 步骤
+// commands/opencode.ts — dsh-cpamc opencode [status|key|remove]，以及 setup 里的 OpenCode 步骤
 
 import type { Ctx } from '../context.js'
 import { requireRootInVps } from '../context.js'
@@ -38,7 +38,7 @@ export async function askOpencodeKey(): Promise<string | undefined> {
 export async function configureOpencode(ctx: Ctx, all: All, opts: OpencodeKeyOptions = {}): Promise<boolean> {
   if ((await opencodeConfigured(ctx)) && !opts.replace) {
     const n = await refreshOpencodeModels(ctx, all.config.proxy).catch(() => 0)
-    skip(L(`已配置${n ? `（${n} 个模型）` : ''}；换 key：dsh-model opencode key`, `Configured${n ? ` (${n} models)` : ''}; to change the key: dsh-model opencode key`))
+    skip(L(`已配置${n ? `（${n} 个模型）` : ''}；换 key：dsh-cpamc opencode key`, `Configured${n ? ` (${n} models)` : ''}; to change the key: dsh-cpamc opencode key`))
     return n > 0
   }
 
@@ -48,11 +48,11 @@ export async function configureOpencode(ctx: Ctx, all: All, opts: OpencodeKeyOpt
   } else if (opts.key !== undefined || canPrompt()) {
     key = opts.key ?? (await askOpencodeKey()) ?? ''
     if (!key) {
-      skip(L('已跳过；之后可执行 dsh-model opencode key', 'Skipped; later run dsh-model opencode key'))
+      skip(L('已跳过；之后可执行 dsh-cpamc opencode key', 'Skipped; later run dsh-cpamc opencode key'))
       return false
     }
   } else {
-    skip(L('非交互环境，跳过；之后执行 dsh-model opencode key（或 echo <key> | dsh-model opencode key --stdin）', 'Non-interactive; skipped. Later run dsh-model opencode key (or echo <key> | dsh-model opencode key --stdin)'))
+    skip(L('非交互环境，跳过；之后执行 dsh-cpamc opencode key（或 echo <key> | dsh-cpamc opencode key --stdin）', 'Non-interactive; skipped. Later run dsh-cpamc opencode key (or echo <key> | dsh-cpamc opencode key --stdin)'))
     return false
   }
   validateKeyShape(key)
@@ -77,7 +77,7 @@ export async function opencode(ctx: Ctx, sub: string | undefined, opts: { stdin?
   if (!sub || sub === 'status') {
     const configured = await opencodeConfigured(ctx)
     if (isJsonMode()) printJson({ configured })
-    else info(configured ? L('已配置（key 在 dsh-model 的 secrets.json，由引擎持有）', 'Configured (key in dsh-model secrets.json, held by the engine)') : L('未配置（dsh-model opencode key）', 'Not configured (dsh-model opencode key)'))
+    else info(configured ? L('已配置（key 在 dsh-cpamc 的 secrets.json，由引擎持有）', 'Configured (key in dsh-cpamc secrets.json, held by the engine)') : L('未配置（dsh-cpamc opencode key）', 'Not configured (dsh-cpamc opencode key)'))
     return 0
   }
   requireRootInVps(ctx)

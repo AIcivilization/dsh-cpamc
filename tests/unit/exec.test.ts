@@ -3,7 +3,7 @@ import { run } from '../../src/util/exec.js'
 
 describe('run', () => {
   it('does not crash when the command does not exist (stdin input given)', async () => {
-    const r = await run('dsh-model-no-such-command-xyz', [], { input: 'hello' })
+    const r = await run('dsh-cpamc-no-such-command-xyz', [], { input: 'hello' })
     expect(r.code).toBe(127)
   })
 

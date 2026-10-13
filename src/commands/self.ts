@@ -1,4 +1,4 @@
-// commands/self.ts — 更新 dsh-model 自己（命令行与 dsh 管理页的「更新」共用）
+// commands/self.ts — 更新 dsh-cpamc 自己（命令行与 dsh 管理页的「更新」共用）
 //
 // 1. 新版本装到原来的位置：npm 全局装的就 npm install -g；从 dsh 管理页一键安装的（程序就在插件目录里）跳过这步；
 // 2. dsh 里的插件换成同一版本（插件页的新代码要重启一次 dsh 才生效）；
@@ -21,7 +21,7 @@ import { info, next, ok, skip, warn } from '../util/output.js'
 import { PKG_ROOT, pkgVersion } from '../util/pkg.js'
 import { takeAdminRequest } from '../service/admin.js'
 
-const REGISTRY = 'https://registry.npmjs.org/dsh-model'
+const REGISTRY = 'https://registry.npmjs.org/dsh-cpamc'
 
 /** a 比 b 新（只比 major.minor.patch） */
 export function isNewer(a: string, b: string): boolean {
@@ -58,7 +58,7 @@ async function npmGlobalInstall(): Promise<{ npm: string; env: NodeJS.ProcessEnv
   const r = await run(n.npm, ['root', '-g'], { env: n.env, timeoutMs: 20_000 })
   if (r.code !== 0) return null
   try {
-    return (await realpath(join(r.stdout.trim(), 'dsh-model'))) === (await realpath(PKG_ROOT)) ? n : null
+    return (await realpath(join(r.stdout.trim(), 'dsh-cpamc'))) === (await realpath(PKG_ROOT)) ? n : null
   } catch {
     return null
   }
@@ -68,7 +68,7 @@ export async function selfUpdate(ctx: Ctx, opts: { to?: string } = {}): Promise<
   requireRootInVps(ctx)
   const current = pkgVersion()
   const target = opts.to ?? (await latestVersion())
-  if (!target) throw new DshModelError('no_latest', L('查不到 npm 上的最新版本（网络？）', 'Could not get the latest version from npm (network?)'), L('稍后再试，或指定：dsh-model self-update --to <版本>', 'Try later, or pass one: dsh-model self-update --to <version>'))
+  if (!target) throw new DshModelError('no_latest', L('查不到 npm 上的最新版本（网络？）', 'Could not get the latest version from npm (network?)'), L('稍后再试，或指定：dsh-cpamc self-update --to <版本>', 'Try later, or pass one: dsh-cpamc self-update --to <version>'))
   if (!opts.to && !isNewer(target, current)) {
     ok(L(`已是最新（${current}；npm 上最新 ${target}）`, `Up to date (${current}; latest on npm is ${target})`))
     return 0
@@ -80,8 +80,8 @@ export async function selfUpdate(ctx: Ctx, opts: { to?: string } = {}): Promise<
   const npm = await npmGlobalInstall()
   if (target === current) skip(L('程序已是这个版本', 'The program is already at this version'))
   else if (npm) {
-    info(L(`npm install -g dsh-model@${target}`, `npm install -g dsh-model@${target}`))
-    const code = await runInherit(npm.npm, ['install', '-g', `dsh-model@${target}`], { env: npm.env })
+    info(L(`npm install -g dsh-cpamc@${target}`, `npm install -g dsh-cpamc@${target}`))
+    const code = await runInherit(npm.npm, ['install', '-g', `dsh-cpamc@${target}`], { env: npm.env })
     if (code !== 0) throw new DshModelError('update_failed', L(`npm 安装失败（退出码 ${code}）`, `npm install failed (exit code ${code})`))
     ok(L(`程序已更新到 ${target}`, `Program updated to ${target}`))
   } else {
@@ -103,11 +103,11 @@ export async function selfUpdate(ctx: Ctx, opts: { to?: string } = {}): Promise<
 
   // 3. 用新版本重装服务并重启
   info(L('用新版本重装服务…', 'Reinstalling the services with the new version…'))
-  const code = await runInherit(process.execPath, [join(root, 'bin', 'dsh-model.js'), 'repair', '--lang', lang()], {
+  const code = await runInherit(process.execPath, [join(root, 'bin', 'dsh-cpamc.js'), 'repair', '--lang', lang()], {
     env: { ...process.env, ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
   })
   if (code !== 0) {
-    warn(L(`repair 没有完成（退出码 ${code}）：执行 dsh-model repair 重试`, `repair did not finish (exit code ${code}); run dsh-model repair to retry`))
+    warn(L(`repair 没有完成（退出码 ${code}）：执行 dsh-cpamc repair 重试`, `repair did not finish (exit code ${code}); run dsh-cpamc repair to retry`))
     return 1
   }
   ok(L(`已更新到 ${target}`, `Updated to ${target}`))
@@ -117,12 +117,12 @@ export async function selfUpdate(ctx: Ctx, opts: { to?: string } = {}): Promise<
 
 /** 管理页请求的日志：更新写在 home 里；卸载会删 home，写在它外面 */
 export function selfJobLog(ctx: Ctx, action: 'update' | 'uninstall'): string {
-  return action === 'uninstall' ? join(dirname(ctx.paths.home), 'dsh-model-uninstall.log') : join(ctx.paths.home, 'update.log')
+  return action === 'uninstall' ? join(dirname(ctx.paths.home), 'dsh-cpamc-uninstall.log') : join(ctx.paths.home, 'update.log')
 }
 
-/** 由 dsh-model-admin.service（root）执行：取出管理页的请求单，只做 update / uninstall */
+/** 由 dsh-cpamc-admin.service（root）执行：取出管理页的请求单，只做 update / uninstall */
 export async function adminRun(ctx: Ctx): Promise<number> {
-  if (!ctx.isRoot) throw new DshModelError('needs_root', L('admin-run 只由 dsh-model-admin 服务以 root 执行', 'admin-run is run by the dsh-model-admin service as root'))
+  if (!ctx.isRoot) throw new DshModelError('needs_root', L('admin-run 只由 dsh-cpamc-admin 服务以 root 执行', 'admin-run is run by the dsh-cpamc-admin service as root'))
   const req = await takeAdminRequest(ctx)
   if (!req) return 0
   const log = selfJobLog(ctx, req.action)
@@ -130,7 +130,7 @@ export async function adminRun(ctx: Ctx): Promise<number> {
   if (ctx.owner) await chown(log, ctx.owner.uid, ctx.owner.gid).catch(() => {})
   const args = req.action === 'update' ? ['update'] : ['uninstall', '--yes', '--remove-plugin', ...(req.keepAuth ? ['--keep-auth'] : [])]
   const code = await new Promise<number>((resolve) => {
-    const child = spawn(process.execPath, [join(PKG_ROOT, 'bin', 'dsh-model.js'), ...args, '--lang', req.lang ?? 'zh'], {
+    const child = spawn(process.execPath, [join(PKG_ROOT, 'bin', 'dsh-cpamc.js'), ...args, '--lang', req.lang ?? 'zh'], {
       stdio: ['ignore', out, out],
       windowsHide: true,
       env: { ...process.env, NO_COLOR: '1', NODE_NO_WARNINGS: '1' },

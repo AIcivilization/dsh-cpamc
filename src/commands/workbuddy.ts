@@ -1,4 +1,4 @@
-// commands/workbuddy.ts — dsh-model workbuddy [status|login|logout|enable|refresh|disable]
+// commands/workbuddy.ts — dsh-cpamc workbuddy [status|login|logout|enable|refresh|disable]
 
 import type { Ctx } from '../context.js'
 import { requireRootInVps } from '../context.js'
@@ -40,7 +40,7 @@ export async function workbuddy(ctx: Ctx, sub: string | undefined, arg?: string)
   requireRootInVps(ctx)
   if (sub === 'refresh') {
     if (await refreshBridge(ctx)) ok(L('bridge 已重读 WorkBuddy 登录态与目录，并同步到引擎和 dsh', 'bridge re-read WorkBuddy sign-in and catalog and synced the engine and dsh'))
-    else warn(L('bridge 没在运行（dsh-model workbuddy enable）', 'bridge is not running (dsh-model workbuddy enable)'))
+    else warn(L('bridge 没在运行（dsh-cpamc workbuddy enable）', 'bridge is not running (dsh-cpamc workbuddy enable)'))
     return 0
   }
   return withLock(ctx, async () => {
@@ -89,7 +89,7 @@ async function login(ctx: Ctx, variant: WorkBuddyVariant): Promise<number> {
       info(L('等待授权中（最长 10 分钟，Ctrl+C 取消）…', 'Waiting for approval (up to 10 minutes, Ctrl+C to cancel)…'))
     },
   })
-  ok(L(`${variant.displayName} 已登录${credential.nickname ? `（${credential.nickname}）` : ''}；令牌只存在 dsh-model 自己的目录（0600）`, `${variant.displayName} signed in${credential.nickname ? ` (${credential.nickname})` : ''}; the token is kept only in dsh-model's own directory (0600)`))
+  ok(L(`${variant.displayName} 已登录${credential.nickname ? `（${credential.nickname}）` : ''}；令牌只存在 dsh-cpamc 自己的目录（0600）`, `${variant.displayName} signed in${credential.nickname ? ` (${credential.nickname})` : ''}; the token is kept only in dsh-cpamc's own directory (0600)`))
   return withLock(ctx, async () => {
     const fresh = await loadAll(ctx)
     await enableWorkbuddy(ctx, fresh)
@@ -102,10 +102,10 @@ async function login(ctx: Ctx, variant: WorkBuddyVariant): Promise<number> {
 async function logout(ctx: Ctx, variant: WorkBuddyVariant): Promise<number> {
   requireRootInVps(ctx)
   if (!(await workbuddyLogout(variant, ctx.paths.home))) {
-    skip(L(`${variant.displayName} 没有用 dsh-model 登录过（桌面 App 的登录请在 App 里退出）`, `${variant.displayName} was not signed in through dsh-model (sign out of the desktop app in the app itself)`))
+    skip(L(`${variant.displayName} 没有用 dsh-cpamc 登录过（桌面 App 的登录请在 App 里退出）`, `${variant.displayName} was not signed in through dsh-cpamc (sign out of the desktop app in the app itself)`))
     return 0
   }
-  ok(L(`已删除 dsh-model 保存的 ${variant.displayName} 令牌`, `Deleted the ${variant.displayName} token saved by dsh-model`))
+  ok(L(`已删除 dsh-cpamc 保存的 ${variant.displayName} 令牌`, `Deleted the ${variant.displayName} token saved by dsh-cpamc`))
   return withLock(ctx, async () => {
     const all = await loadAll(ctx)
     if (all.state.bridgeService) await enableWorkbuddy(ctx, all) // 重启 bridge，让它不再服务这个产品

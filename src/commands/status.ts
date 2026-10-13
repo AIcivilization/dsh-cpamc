@@ -65,20 +65,20 @@ export async function status(ctx: Ctx): Promise<number> {
   }
   const yes = (b: boolean, t: string, f: string) => (b ? green(t) : red(f))
   const wbLine = !apps.length
-    ? dim(L('未登录（dsh-model workbuddy login）', 'not signed in (dsh-model workbuddy login)'))
+    ? dim(L('未登录（dsh-cpamc workbuddy login）', 'not signed in (dsh-cpamc workbuddy login)'))
     : !bridgeCfg
-      ? yellow(L('未启用（dsh-model workbuddy enable）', 'not enabled (dsh-model workbuddy enable)'))
+      ? yellow(L('未启用（dsh-cpamc workbuddy enable）', 'not enabled (dsh-cpamc workbuddy enable)'))
       : !bridgeUp
-        ? red(L(`bridge 没在运行（127.0.0.1:${bridgeCfg.port}，dsh-model repair）`, `bridge not running (127.0.0.1:${bridgeCfg.port}, dsh-model repair)`))
+        ? red(L(`bridge 没在运行（127.0.0.1:${bridgeCfg.port}，dsh-cpamc repair）`, `bridge not running (127.0.0.1:${bridgeCfg.port}, dsh-cpamc repair)`))
         : cats.map((c) => (c.signedIn ? green(`${c.label} ${c.models.length}`) : yellow(L(`${c.label} 未登录`, `${c.label} signed out`)))).join(' · ') || yellow(L('目录还没读到', 'catalog not read yet'))
   info(
     table([
-      [L('统一端点', 'Endpoint'), engineInstalled ? yes(up, `127.0.0.1:${all.config.port}`, L('未运行（dsh-model repair）', 'not running (dsh-model repair)')) + dim(`  v${version ?? '-'}${svc ? ` · ${svc.detail ?? '-'}` : ''}`) : red(L('未安装（dsh-model setup）', 'not installed (dsh-model setup)'))],
+      [L('统一端点', 'Endpoint'), engineInstalled ? yes(up, `127.0.0.1:${all.config.port}`, L('未运行（dsh-cpamc repair）', 'not running (dsh-cpamc repair)')) + dim(`  v${version ?? '-'}${svc ? ` · ${svc.detail ?? '-'}` : ''}`) : red(L('未安装（dsh-cpamc setup）', 'not installed (dsh-cpamc setup)'))],
       [L('模型', 'Models'), models.length ? [...groups].map(([g, n]) => `${g === 'subscription' ? L('订阅', 'subscription') : g} ${n}`).join(' · ') : yellow('0')],
-      ['OpenCode Zen', oc ? green(L(`已配置 · ${groups.get('opencode') ?? 0} 个模型`, `configured · ${groups.get('opencode') ?? 0} models`)) : yellow(L('未配置（dsh-model opencode key）', 'not configured (dsh-model opencode key)'))],
+      ['OpenCode Zen', oc ? green(L(`已配置 · ${groups.get('opencode') ?? 0} 个模型`, `configured · ${groups.get('opencode') ?? 0} models`)) : yellow(L('未配置（dsh-cpamc opencode key）', 'not configured (dsh-cpamc opencode key)'))],
       ['WorkBuddy', wbLine],
-      [L('订阅', 'Subscriptions'), logged.length ? logged.join(', ') : dim(L('无（dsh-model login <上游>）', 'none (dsh-model login <upstream>)'))],
-      ['dsh', data.dsh ? yes(dshOk, `${data.dsh.profile} ✓`, L(`${data.dsh.profile}：provider 不在了（dsh-model repair）`, `${data.dsh.profile}: provider missing (dsh-model repair)`)) : yellow(L('未接入', 'not connected'))],
+      [L('订阅', 'Subscriptions'), logged.length ? logged.join(', ') : dim(L('无（dsh-cpamc login <上游>）', 'none (dsh-cpamc login <upstream>)'))],
+      ['dsh', data.dsh ? yes(dshOk, `${data.dsh.profile} ✓`, L(`${data.dsh.profile}：provider 不在了（dsh-cpamc repair）`, `${data.dsh.profile}: provider missing (dsh-cpamc repair)`)) : yellow(L('未接入', 'not connected'))],
       [L('远程访问', 'Remote'), all.config.remote.mode],
       [L('出站代理', 'Proxy'), data.proxy ?? L('不使用', 'none')],
       ['Keys', data.keys.join(', ') || '-'],
@@ -120,14 +120,14 @@ export async function doctor(ctx: Ctx, opts: { e2e?: boolean; all?: boolean; mod
   // —— 统一端点 ——
   const engineInstalled = await exists(currentBinary(ctx))
   const version = engineInstalled ? await currentVersion(ctx) : null
-  add('engine', engineInstalled ? (version === all.config.engine.version ? 'ok' : 'warn') : 'fail', engineInstalled ? `v${version}` : L('未安装（dsh-model setup）', 'not installed (dsh-model setup)'))
+  add('engine', engineInstalled ? (version === all.config.engine.version ? 'ok' : 'warn') : 'fail', engineInstalled ? `v${version}` : L('未安装（dsh-cpamc setup）', 'not installed (dsh-cpamc setup)'))
   if (engineInstalled && !ctx.serviceDisabled) {
     const s = await serviceFor(ctx).status()
     add('engine-service', s.running ? 'ok' : 'fail', `${serviceFor(ctx).kind}: ${s.detail ?? '-'}`)
   }
   if (all.config.proxy) {
     const reach = await proxyReachable(all.config.proxy)
-    add('proxy', reach ? 'ok' : 'fail', reach ? L(`代理 ${redactProxy(all.config.proxy)} 可连接`, `Proxy ${redactProxy(all.config.proxy)} reachable`) : L(`代理 ${redactProxy(all.config.proxy)} 连不上（代理软件没开？dsh-model setup --proxy <地址>|none）`, `Proxy ${redactProxy(all.config.proxy)} unreachable (proxy app not running? dsh-model setup --proxy <url>|none)`))
+    add('proxy', reach ? 'ok' : 'fail', reach ? L(`代理 ${redactProxy(all.config.proxy)} 可连接`, `Proxy ${redactProxy(all.config.proxy)} reachable`) : L(`代理 ${redactProxy(all.config.proxy)} 连不上（代理软件没开？dsh-cpamc setup --proxy <地址>|none）`, `Proxy ${redactProxy(all.config.proxy)} unreachable (proxy app not running? dsh-cpamc setup --proxy <url>|none)`))
   }
   const up = engineInstalled ? await healthy(all.config.port) : false
   if (engineInstalled) add('healthz', up ? 'ok' : 'fail', `127.0.0.1:${all.config.port}`)
@@ -149,22 +149,22 @@ export async function doctor(ctx: Ctx, opts: { e2e?: boolean; all?: boolean; mod
   // —— OpenCode / WorkBuddy ——
   const oc = await opencodeConfigured(ctx)
   const ocModels = models.filter((m) => m.id.startsWith('opencode/')).length
-  add('opencode', !oc ? 'warn' : up && !ocModels ? 'fail' : 'ok', !oc ? L('OpenCode Zen 未配置（dsh-model opencode key）', 'OpenCode Zen not configured (dsh-model opencode key)') : up && !ocModels ? L('已配置但引擎里没有 opencode/ 模型（dsh-model repair）', 'configured but no opencode/ models in the engine (dsh-model repair)') : L(`OpenCode Zen：${ocModels} 个模型`, `OpenCode Zen: ${ocModels} models`))
+  add('opencode', !oc ? 'warn' : up && !ocModels ? 'fail' : 'ok', !oc ? L('OpenCode Zen 未配置（dsh-cpamc opencode key）', 'OpenCode Zen not configured (dsh-cpamc opencode key)') : up && !ocModels ? L('已配置但引擎里没有 opencode/ 模型（dsh-cpamc repair）', 'configured but no opencode/ models in the engine (dsh-cpamc repair)') : L(`OpenCode Zen：${ocModels} 个模型`, `OpenCode Zen: ${ocModels} models`))
   const apps = await availableVariants(ctx.paths.home)
   const bridgeCfg = await loadBridgeConfig(ctx.paths.home)
   // 守护进程（来源开关、登录、统计、WorkBuddy 转发）总要在跑；只有刻意跳过系统服务时不查
   if (!ctx.serviceDisabled) {
-    if (!bridgeCfg) add('daemon', 'fail', L('守护进程没配置（dsh-model setup）', 'Daemon not configured (dsh-model setup)'))
+    if (!bridgeCfg) add('daemon', 'fail', L('守护进程没配置（dsh-cpamc setup）', 'Daemon not configured (dsh-cpamc setup)'))
     else {
       const bUp = await bridgeHealthy(bridgeCfg.port, bridgeCfg.secret)
-      add('daemon', bUp ? 'ok' : 'fail', bUp ? L(`守护进程 127.0.0.1:${bridgeCfg.port} 运行中`, `daemon 127.0.0.1:${bridgeCfg.port} running`) : L('守护进程没在运行（dsh-model logs --bridge；dsh-model repair）', 'daemon not running (dsh-model logs --bridge; dsh-model repair)'))
+      add('daemon', bUp ? 'ok' : 'fail', bUp ? L(`守护进程 127.0.0.1:${bridgeCfg.port} 运行中`, `daemon 127.0.0.1:${bridgeCfg.port} running`) : L('守护进程没在运行（dsh-cpamc logs --bridge；dsh-cpamc repair）', 'daemon not running (dsh-cpamc logs --bridge; dsh-cpamc repair)'))
     }
   }
   if (apps.length && bridgeCfg) {
     {
       for (const c of await loadCatalogs(ctx.paths.home)) {
         const inEngine = models.filter((m) => m.id.startsWith(`${c.prefix}/`)).length
-        if (!c.signedIn) add(`workbuddy-${c.key}`, 'warn', L(`${c.label}：未登录${c.error ? `（${c.error}）` : ''}——在 App 里登录后执行 dsh-model workbuddy refresh`, `${c.label}: signed out${c.error ? ` (${c.error})` : ''} — sign in to the app, then dsh-model workbuddy refresh`))
+        if (!c.signedIn) add(`workbuddy-${c.key}`, 'warn', L(`${c.label}：未登录${c.error ? `（${c.error}）` : ''}——在 App 里登录后执行 dsh-cpamc workbuddy refresh`, `${c.label}: signed out${c.error ? ` (${c.error})` : ''} — sign in to the app, then dsh-cpamc workbuddy refresh`))
         else add(`workbuddy-${c.key}`, up && !inEngine ? 'fail' : 'ok', L(`${c.label}：已登录，${c.models.length} 个模型${up ? `（引擎里 ${inEngine} 个）` : ''}${c.error ? `；${c.error}` : ''}`, `${c.label}: signed in, ${c.models.length} models${up ? ` (${inEngine} in engine)` : ''}${c.error ? `; ${c.error}` : ''}`))
       }
     }
@@ -175,21 +175,21 @@ export async function doctor(ctx: Ctx, opts: { e2e?: boolean; all?: boolean; mod
   if (all.state.dsh) {
     const d = all.state.dsh
     const present = await anyProviderPresent(all.state).catch(() => false)
-    add('dsh-provider', present ? 'ok' : models.length ? 'fail' : 'warn', present ? L(`dsh（${d.profile}）里有 dsh-model`, `dsh-model present in dsh (${d.profile})`) : models.length ? L('dsh 里没有 dsh-model（dsh-model repair）', 'dsh-model missing in dsh (dsh-model repair)') : L('dsh 里还没有 dsh-model：引擎里还没有模型', 'dsh-model not in dsh yet: the engine has no models'))
+    add('dsh-provider', present ? 'ok' : models.length ? 'fail' : 'warn', present ? L(`dsh（${d.profile}）里有 dsh-cpamc`, `dsh-cpamc present in dsh (${d.profile})`) : models.length ? L('dsh 里没有 dsh-cpamc（dsh-cpamc repair）', 'dsh-cpamc missing in dsh (dsh-cpamc repair)') : L('dsh 里还没有 dsh-cpamc：引擎里还没有模型', 'dsh-cpamc not in dsh yet: the engine has no models'))
     const credText = await readText(d.credFile)
-    add('dsh-key', readRef(credText) === key ? 'ok' : 'fail', readRef(credText) === key ? L(`${KEY_REF} 与 key 一致`, `${KEY_REF} matches`) : L(`${KEY_REF} 与 key 不一致（dsh-model repair）`, `${KEY_REF} does not match (dsh-model repair)`))
+    add('dsh-key', readRef(credText) === key ? 'ok' : 'fail', readRef(credText) === key ? L(`${KEY_REF} 与 key 一致`, `${KEY_REF} matches`) : L(`${KEY_REF} 与 key 不一致（dsh-cpamc repair）`, `${KEY_REF} does not match (dsh-cpamc repair)`))
     const cm = await fileMode(d.credFile)
     // Windows 没有 Unix 权限位（读出来总是 666），权限靠用户目录本身的访问控制，不查
     if (cm != null && ctx.platform !== 'win32') add('dsh-cred-perms', cm === 0o600 ? 'ok' : 'fail', L(`.credentials.yaml 权限 ${cm.toString(8)}（dsh 要求 600）`, `.credentials.yaml mode ${cm.toString(8)} (dsh requires 600)`))
     const patchText = await readText(d.patchFile)
     if (patchText != null && d.writtenPatchSha && sha256(patchText) !== d.writtenPatchSha) {
-      add('dsh-patch-edited', 'ok', L('cordis.patch.yml 在接线后被修改过（卸载时只会移除 dsh-model 的部分）', 'cordis.patch.yml edited since connect (uninstall will remove only dsh-model parts)'))
+      add('dsh-patch-edited', 'ok', L('cordis.patch.yml 在接线后被修改过（卸载时只会移除 dsh-cpamc 的部分）', 'cordis.patch.yml edited since connect (uninstall will remove only dsh-cpamc parts)'))
     }
   } else {
-    add('dsh-provider', 'warn', L('还没接入 dsh（dsh-model setup）', 'Not connected to dsh (dsh-model setup)'))
+    add('dsh-provider', 'warn', L('还没接入 dsh（dsh-cpamc setup）', 'Not connected to dsh (dsh-cpamc setup)'))
   }
   if (ctx.env[KEY_REF]) add('env-override', 'warn', L(`环境变量 ${KEY_REF} 会覆盖 dsh 凭据里的值`, `Env var ${KEY_REF} overrides the value in dsh credentials`))
-  if ((await exists('/etc/caddy/dsh-model.conf')) && all.config.remote.mode !== 'caddy') add('caddy-orphan', 'warn', L('发现残留的 /etc/caddy/dsh-model.conf', 'Found leftover /etc/caddy/dsh-model.conf'))
+  if ((await exists('/etc/caddy/dsh-cpamc.conf')) && all.config.remote.mode !== 'caddy') add('caddy-orphan', 'warn', L('发现残留的 /etc/caddy/dsh-cpamc.conf', 'Found leftover /etc/caddy/dsh-cpamc.conf'))
 
   // —— e2e：默认每组（订阅按 owned_by，opencode/workbuddy 按前缀）取一个模型 ——
   const e2e: { model: string; stream: string; tool: string; ok: boolean }[] = []

@@ -34,19 +34,19 @@ describe.skipIf(process.platform !== 'win32')('windows end to end (real backgrou
   const saved = { ...process.env }
 
   beforeAll(async () => {
-    t = await tempCtx({ DSH_MODEL_ENGINE_ARCHIVE: await cachedArchive() })
+    t = await tempCtx({ DSH_CPAMC_ENGINE_ARCHIVE: await cachedArchive() })
     const env = { ...t.ctx.env }
-    delete env.DSH_MODEL_SERVICE
+    delete env.DSH_CPAMC_SERVICE
     Object.assign(process.env, {
-      DSH_MODEL_MODE: 'local',
-      DSH_MODEL_HOME: t.ctx.paths.home,
+      DSH_CPAMC_MODE: 'local',
+      DSH_CPAMC_HOME: t.ctx.paths.home,
       DSH_HOME: t.ctx.dshHome,
-      DSH_MODEL_DSH_VERSION: '0.2.0-rc.2',
-      DSH_MODEL_ENGINE_ARCHIVE: env.DSH_MODEL_ENGINE_ARCHIVE,
-      DSH_MODEL_LANG: 'en',
-      DSH_MODEL_NO_APP_DISCOVERY: '1',
+      DSH_CPAMC_DSH_VERSION: '0.2.0-rc.2',
+      DSH_CPAMC_ENGINE_ARCHIVE: env.DSH_CPAMC_ENGINE_ARCHIVE,
+      DSH_CPAMC_LANG: 'en',
+      DSH_CPAMC_NO_APP_DISCOVERY: '1',
     })
-    delete process.env.DSH_MODEL_SERVICE
+    delete process.env.DSH_CPAMC_SERVICE
     t.ctx = { ...t.ctx, serviceDisabled: false, env: { ...process.env } }
     await writeFile(join(t.profileDir, 'cordis.patch.yml'), await fixture('no-llm.yml'))
     await writeFile(join(t.ctx.dshHome, '.credentials.yaml'), await fixture('credentials.yml'))
@@ -68,11 +68,11 @@ describe.skipIf(process.platform !== 'win32')('windows end to end (real backgrou
     expect(await unauthStatus(port)).toBe(401)
     const sources = await control<{ id: string }[]>(t.ctx, 'GET', '/sources')
     expect(sources.map((s) => s.id)).toContain('workbuddy')
-    for (const label of ['dsh-model-engine', 'dsh-model-bridge']) expect((await run('reg', ['query', RUN_KEY, '/v', label])).code).toBe(0)
+    for (const label of ['dsh-cpamc-engine', 'dsh-cpamc-bridge']) expect((await run('reg', ['query', RUN_KEY, '/v', label])).code).toBe(0)
 
     expect(await main(['uninstall', '--yes'])).toBe(0)
     expect(await healthy(port)).toBe(false)
-    for (const label of ['dsh-model-engine', 'dsh-model-bridge']) expect((await run('reg', ['query', RUN_KEY, '/v', label])).code).not.toBe(0)
+    for (const label of ['dsh-cpamc-engine', 'dsh-cpamc-bridge']) expect((await run('reg', ['query', RUN_KEY, '/v', label])).code).not.toBe(0)
     expect(existsSync(t.ctx.paths.home)).toBe(false)
   }, 180_000)
 })

@@ -1,6 +1,6 @@
 // state.ts — config.json（用户意图）、state.json（安装台账）、.lock（命令互斥）
 //
-// state.json 是卸载与 repair 的唯一依据：dsh-model 写到 home 之外的每个文件都登记在这里。
+// state.json 是卸载与 repair 的唯一依据：dsh-cpamc 写到 home 之外的每个文件都登记在这里。
 
 import { open, readFile, rm } from 'node:fs/promises'
 import type { Ctx } from './context.js'
@@ -9,7 +9,7 @@ import { L } from './i18n.js'
 import { ensureDir, readJson, writeJson } from './util/fs.js'
 
 export const DEFAULT_PORT = 8317
-export const PROVIDER_ID = 'dsh-model'
+export const PROVIDER_ID = 'dsh-cpamc'
 
 export type RemoteMode = 'off' | 'ssh' | 'tailscale' | 'caddy'
 
@@ -22,7 +22,7 @@ export interface Config {
   /** 出站代理：undefined = 还没定（setup 自动检测），null = 明确不用 */
   proxy?: string | null
   /** 每个来源在 dsh 里显示哪些模型（管理页勾选）；没有的来源用默认挑选，见 dsh/pick.ts */
-  dshModels?: Record<string, string[]>
+  dshCpamcs?: Record<string, string[]>
   /** 关掉的来源（workbuddy / workbuddy-ai / opencode；引擎来源的开关存在凭据的 disabled 上） */
   disabledSources?: string[]
   /** WorkBuddy bridge（统一端点下的自有组件） */
@@ -42,7 +42,7 @@ export interface DshState {
   patchExisted: boolean
   credExisted: boolean
   createdLlmEntry: boolean
-  /** dsh-model 拥有的 llm-pi-ai provider id 与凭据 ref 名（卸载时只摘这些） */
+  /** dsh-cpamc 拥有的 llm-pi-ai provider id 与凭据 ref 名（卸载时只摘这些） */
   ownedProviders: string[]
   ownedRefs: string[]
   writtenPatchSha: string | null
@@ -53,7 +53,7 @@ export interface DshState {
 export interface PluginRecord {
   name: string
   version: string
-  /** 是 dsh-model 装的（卸载时才移除）；用户原本就装了的为 false */
+  /** 是 dsh-cpamc 装的（卸载时才移除）；用户原本就装了的为 false */
   installedByUs: boolean
   installedAt: string
 }
@@ -108,9 +108,9 @@ export async function saveConfig(ctx: Ctx, config: Config): Promise<void> {
 export async function loadState(ctx: Ctx): Promise<State> {
   const stored = await readJson<Partial<State>>(ctx.paths.state)
   const state: State = { ...stored, engine: { versions: [], ...stored?.engine } }
-  // 0.1.0 的台账没有所有权字段：那时只会写 dsh-model 端点与 DSH_MODEL_API_KEY
+  // 0.1.0 的台账没有所有权字段：那时只会写 dsh-cpamc 端点与 DSH_CPAMC_API_KEY
   if (state.dsh && !state.dsh.ownedProviders) state.dsh.ownedProviders = [PROVIDER_ID]
-  if (state.dsh && !state.dsh.ownedRefs) state.dsh.ownedRefs = ['DSH_MODEL_API_KEY']
+  if (state.dsh && !state.dsh.ownedRefs) state.dsh.ownedRefs = ['DSH_CPAMC_API_KEY']
   return state
 }
 
@@ -139,7 +139,7 @@ export async function withLock<T>(ctx: Ctx, fn: () => Promise<T>): Promise<T> {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     const pid = Number((await readFile(ctx.paths.lock, 'utf8').catch(() => '')).trim())
     if (pid && pid !== process.pid && isAlive(pid)) {
-      throw new DshModelError('locked', L(`另一个 dsh-model 命令正在运行（pid ${pid}），等它结束再试`, `Another dsh-model command is running (pid ${pid}); try again when it finishes`), L('如果是终端里的命令停在等你输入，回到终端完成它', 'If a command in a terminal is waiting for your input, finish it there'))
+      throw new DshModelError('locked', L(`另一个 dsh-cpamc 命令正在运行（pid ${pid}），等它结束再试`, `Another dsh-cpamc command is running (pid ${pid}); try again when it finishes`), L('如果是终端里的命令停在等你输入，回到终端完成它', 'If a command in a terminal is waiting for your input, finish it there'))
     }
     await rm(ctx.paths.lock, { force: true })
     await acquire()

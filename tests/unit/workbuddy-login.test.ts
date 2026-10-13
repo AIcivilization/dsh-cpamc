@@ -36,7 +36,7 @@ describe('workbuddy login (own flow, fake server)', () => {
     })
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
     const port = (server.address() as { port: number }).port
-    process.env.DSH_MODEL_WORKBUDDY_BASE = `http://127.0.0.1:${port}`
+    process.env.DSH_CPAMC_WORKBUDDY_BASE = `http://127.0.0.1:${port}`
     try {
       const { ctx } = await tempCtx()
       let printed = ''
@@ -56,7 +56,7 @@ describe('workbuddy login (own flow, fake server)', () => {
       const current = await store.current()
       expect(current).toMatchObject({ accessToken: 'at-123', uid: 'u-1', nickname: '测试' })
     } finally {
-      delete process.env.DSH_MODEL_WORKBUDDY_BASE
+      delete process.env.DSH_CPAMC_WORKBUDDY_BASE
       server.close()
     }
   }, 60_000)

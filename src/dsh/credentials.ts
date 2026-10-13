@@ -7,7 +7,7 @@ import YAML, { isMap, type Document, type YAMLMap } from 'yaml'
 import { DshModelError } from '../errors.js'
 import { L } from '../i18n.js'
 
-export const KEY_REF = 'DSH_MODEL_API_KEY'
+export const KEY_REF = 'DSH_CPAMC_API_KEY'
 
 function parse(text: string | null): Document {
   const src = text ?? ''

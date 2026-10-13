@@ -31,7 +31,7 @@ async function confirm(question: string): Promise<boolean> {
 export async function uninstall(ctx: Ctx, opts: { yes?: boolean; keepAuth?: boolean; removePlugin?: boolean }): Promise<number> {
   requireRootInVps(ctx)
   if (!(await exists(ctx.paths.home))) {
-    info(L('没有安装过 dsh-model（或已卸载）', 'dsh-model is not installed (or already removed)'))
+    info(L('没有安装过 dsh-cpamc（或已卸载）', 'dsh-cpamc is not installed (or already removed)'))
     return 0
   }
   const all = await loadAll(ctx)
@@ -59,7 +59,7 @@ export async function uninstall(ctx: Ctx, opts: { yes?: boolean; keepAuth?: bool
     if (all.state.remote && all.state.remote.mode !== 'off') await disableRemote(ctx, all)
   })
   await step('dsh-plugin', async () => {
-    if (await removeDshPlugin(ctx, all, { force: opts.removePlugin })) ok(L('已从 dsh 移除 dsh-model 插件', 'Removed the dsh-model plugin from dsh'))
+    if (await removeDshPlugin(ctx, all, { force: opts.removePlugin })) ok(L('已从 dsh 移除 dsh-cpamc 插件', 'Removed the dsh-cpamc plugin from dsh'))
   })
   await step('workbuddy', async () => {
     if (await removeWorkbuddyPlugin(ctx, all)) ok(L('已移除上一版安装的 WorkBuddy 插件', 'Removed the WorkBuddy plugin installed by a previous version'))
@@ -81,7 +81,7 @@ export async function uninstall(ctx: Ctx, opts: { yes?: boolean; keepAuth?: bool
   })
   await step('auth-backup', async () => {
     if (!opts.keepAuth || !authCount) return
-    const dest = join(homedir(), `dsh-model-auth-backup-${timestamp()}`)
+    const dest = join(homedir(), `dsh-cpamc-auth-backup-${timestamp()}`)
     await cp(ctx.paths.auth, dest, { recursive: true, filter: (src) => !src.includes('/logs') })
     ok(L(`登录凭据已备份到 ${dest}`, `Credentials backed up to ${dest}`))
   })
@@ -92,6 +92,6 @@ export async function uninstall(ctx: Ctx, opts: { yes?: boolean; keepAuth?: bool
   // Windows：刚结束的进程可能还没完全退出、还占着目录，删除会短暂报 EBUSY / EPERM，重试一会儿
   await rm(ctx.paths.home, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })
   ok(L(`已删除 ${ctx.paths.home}，卸载完成`, `Deleted ${ctx.paths.home}; uninstall complete`))
-  info(L('最后可执行：npm uninstall -g dsh-model', 'Finally you can run: npm uninstall -g dsh-model'))
+  info(L('最后可执行：npm uninstall -g dsh-cpamc', 'Finally you can run: npm uninstall -g dsh-cpamc'))
   return 0
 }

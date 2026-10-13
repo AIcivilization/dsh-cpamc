@@ -1,6 +1,6 @@
 // integrations/opencode.ts — OpenCode Zen 作为引擎的 openai-compatibility 上游（统一端点，设计 §1.3）
 //
-// key 存在 dsh-model 自己的 secrets.json（0600），由引擎持有；模型目录取自公开的 /zen/v1/models。
+// key 存在 dsh-cpamc 自己的 secrets.json（0600），由引擎持有；模型目录取自公开的 /zen/v1/models。
 // OpenCode 的免费档不能免 key 从第三方调用（官方 403 FreeTierError），所以必须有 key。
 // v0.2.0 曾把 key 写进 dsh 的凭据库并启用 dsh 内置 opencode 路由：migrateDshOpencode 负责迁走。
 
@@ -33,7 +33,7 @@ export async function verifyOpencodeKey(key: string, proxy: string | null | unde
     const ids = ((JSON.parse(list.stdout) as { data?: { id: string }[] }).data ?? []).map((m) => m.id)
     model = ids.includes('big-pickle') ? 'big-pickle' : (ids.find((id) => id.endsWith('-free')) ?? model)
   } catch {
-    if (list.code !== 0) return { ok: false, status: null, detail: L(`连不上 opencode.ai${proxy ? '' : '（需要代理？dsh-model setup --proxy <地址>）'}`, `cannot reach opencode.ai${proxy ? '' : ' (proxy needed? dsh-model setup --proxy <url>)'}`) }
+    if (list.code !== 0) return { ok: false, status: null, detail: L(`连不上 opencode.ai${proxy ? '' : '（需要代理？dsh-cpamc setup --proxy <地址>）'}`, `cannot reach opencode.ai${proxy ? '' : ' (proxy needed? dsh-cpamc setup --proxy <url>)'}`) }
   }
   const body = JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] })
   const r = await run(
@@ -99,7 +99,7 @@ export async function removeOpencodeKey(ctx: Ctx): Promise<boolean> {
   return true
 }
 
-/** v0.2.0 → 统一端点：把 dsh-model 写进 dsh 的 OPENCODE_API_KEY 收回 secrets.json，并移除 dsh 里的 opencode 路由 */
+/** v0.2.0 → 统一端点：把 dsh-cpamc 写进 dsh 的 OPENCODE_API_KEY 收回 secrets.json，并移除 dsh 里的 opencode 路由 */
 export async function migrateDshOpencode(ctx: Ctx, all: All): Promise<boolean> {
   const dsh = all.state.dsh
   if (!dsh?.ownedProviders?.includes(OPENCODE_PROVIDER) && !dsh?.ownedRefs?.includes(OPENCODE_REF)) return false

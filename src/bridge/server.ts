@@ -1,4 +1,4 @@
-// bridge/server.ts — dsh-model 的 WorkBuddy bridge：把 WorkBuddy 私有接口变成本机 OpenAI 兼容接口
+// bridge/server.ts — dsh-cpamc 的 WorkBuddy bridge：把 WorkBuddy 私有接口变成本机 OpenAI 兼容接口
 //
 // 只绑 127.0.0.1，要求内部密钥（引擎的 openai-compatibility 上游带着它来）；Host / Origin 必须是回环，挡 DNS rebinding。
 // 路由按产品分前缀：/cn/v1/...（WorkBuddy 国内版）、/ai/v1/...（WorkBuddy AI 国际版）。
@@ -29,7 +29,7 @@ export interface BridgeOptions {
   secret: string
   variants: VariantRuntime[]
   log?: (message: string) => void
-  /** POST /refresh：立刻重读登录态与目录（dsh-model workbuddy refresh 用） */
+  /** POST /refresh：立刻重读登录态与目录（dsh-cpamc workbuddy refresh 用） */
   onRefresh?: () => Promise<unknown>
   /** /control/*：守护进程的控制接口（来源开关、登录、key、统计），给 CLI 与 dsh 插件用 */
   onControl?: (method: string, path: string, body: unknown, query: URLSearchParams) => Promise<{ status: number; body: unknown }>
@@ -122,7 +122,7 @@ export function createBridge(options: BridgeOptions): { server: Server; ready: P
         }
       }
       // 提示语跟着调用方的语言（dsh 页面 / CLI 的 --lang）；守护进程自己由 launchd 启动时没有 LANG
-      const lang = String(req.headers['x-dsh-model-lang'] ?? '')
+      const lang = String(req.headers['x-dsh-cpamc-lang'] ?? '')
       if (lang === 'zh' || lang === 'en') initLang(lang)
       const r = await options.onControl(req.method ?? 'GET', url.slice('/control'.length), body, fullUrl.searchParams)
       return json(res, r.status, r.body)

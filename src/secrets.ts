@@ -1,5 +1,5 @@
-// secrets.ts — dsh-model 自己保管的上游凭据（目前是 OpenCode Zen key）。secrets.json 0600，不进 dsh 的凭据库：
-// 统一端点下 dsh 只认 dsh-model 一个 provider，上游 key 由引擎持有。
+// secrets.ts — dsh-cpamc 自己保管的上游凭据（目前是 OpenCode Zen key）。secrets.json 0600，不进 dsh 的凭据库：
+// 统一端点下 dsh 只认 dsh-cpamc 一个 provider，上游 key 由引擎持有。
 
 import { join } from 'node:path'
 import type { Ctx } from './context.js'

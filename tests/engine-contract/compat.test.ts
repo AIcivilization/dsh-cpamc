@@ -28,7 +28,7 @@ async function engineBinary(ctx: Awaited<ReturnType<typeof tempCtx>>['ctx']): Pr
     const res = await fetch(asset.url)
     await writeFile(file, Buffer.from(await res.arrayBuffer()))
   }
-  ctx.env.DSH_MODEL_ENGINE_ARCHIVE = file
+  ctx.env.DSH_CPAMC_ENGINE_ARCHIVE = file
   await installVersion(ctx, manifest.version, asset)
   await activateVersion(ctx, manifest.version)
   return currentBinary(ctx)

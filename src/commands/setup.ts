@@ -1,6 +1,6 @@
 // commands/setup.ts — 一条命令：引擎（统一端点）+ OpenCode Zen + WorkBuddy bridge → 全部接进 dsh。可重复执行
 //
-// 设计 §1.3：所有模型都从引擎 127.0.0.1:8317/v1 出去，dsh 只认 dsh-model 一个 provider。
+// 设计 §1.3：所有模型都从引擎 127.0.0.1:8317/v1 出去，dsh 只认 dsh-cpamc 一个 provider。
 
 import type { Ctx } from '../context.js'
 import { requireRootInVps } from '../context.js'
@@ -68,7 +68,7 @@ export async function setup(ctx: Ctx, opts: SetupOptions): Promise<number> {
     // v0.2.0 的做法（dsh 内置 opencode 路由、dsh-workbuddy-connect 插件）迁到统一端点
     await step('migrate', async () => {
       if (await migrateDshOpencode(ctx, all)) ok(L('已把 OpenCode 从 dsh 内置路由迁到统一端点', 'Moved OpenCode from the dsh built-in route to the unified endpoint'))
-      if (await removeWorkbuddyPlugin(ctx, all)) ok(L('已移除上一版安装的 dsh-workbuddy-connect 插件，改用 dsh-model 自己的 bridge', 'Removed the dsh-workbuddy-connect plugin installed by the previous version; using dsh-model\'s own bridge'))
+      if (await removeWorkbuddyPlugin(ctx, all)) ok(L('已移除上一版安装的 dsh-workbuddy-connect 插件，改用 dsh-cpamc 自己的 bridge', 'Removed the dsh-workbuddy-connect plugin installed by the previous version; using dsh-cpamc\'s own bridge'))
     })
 
     info('')
@@ -132,7 +132,7 @@ export async function setup(ctx: Ctx, opts: SetupOptions): Promise<number> {
       })
     } else {
       await applyEngineConfig(ctx, all)
-      skip(L('引擎没在运行，跳过同步到 dsh（启动后执行 dsh-model models sync）', 'Engine not running; skipped syncing to dsh (run dsh-model models sync once it is up)'))
+      skip(L('引擎没在运行，跳过同步到 dsh（启动后执行 dsh-cpamc models sync）', 'Engine not running; skipped syncing to dsh (run dsh-cpamc models sync once it is up)'))
     }
     const groups = new Map<string, number>()
     for (const id of ids) {
@@ -142,10 +142,10 @@ export async function setup(ctx: Ctx, opts: SetupOptions): Promise<number> {
     if (groups.size) info(`  ${[...groups].map(([g, n]) => `${g} ${n}`).join(' · ')}`)
 
     info('')
-    if (failures.length) warn(L(`有 ${failures.length} 项没完成：${failures.join('、')}。修好后重新执行 dsh-model setup 即可`, `${failures.length} item(s) not done: ${failures.join(', ')}. Fix them and re-run dsh-model setup`))
+    if (failures.length) warn(L(`有 ${failures.length} 项没完成：${failures.join('、')}。修好后重新执行 dsh-cpamc setup 即可`, `${failures.length} item(s) not done: ${failures.join(', ')}. Fix them and re-run dsh-cpamc setup`))
     const base = all.state.remote?.mode === 'caddy' && all.state.remote.publicUrl ? all.state.remote.publicUrl : `http://127.0.0.1:${all.config.port}/v1`
-    next(L(`在 dsh 的模型列表里选 dsh-model 下的模型。其他软件：Base URL ${base}，key 用 dsh-model key add <名称> 领取`, `Pick a dsh-model model in dsh. Other software: Base URL ${base}, get a key with dsh-model key add <name>`))
-    info(L('  订阅上游（codex 等）：dsh-model login <上游>', '  Subscription upstreams (codex etc.): dsh-model login <upstream>'))
+    next(L(`在 dsh 的模型列表里选 dsh-cpamc 下的模型。其他软件：Base URL ${base}，key 用 dsh-cpamc key add <名称> 领取`, `Pick a dsh-cpamc model in dsh. Other software: Base URL ${base}, get a key with dsh-cpamc key add <name>`))
+    info(L('  订阅上游（codex 等）：dsh-cpamc login <上游>', '  Subscription upstreams (codex etc.): dsh-cpamc login <upstream>'))
     return failures.length ? 1 : 0
   })
 }
@@ -161,7 +161,7 @@ function resolveProxy(all: All, opts: SetupOptions, found: { url: string; source
 }
 
 /** 订阅引擎：下载校验 → key → 端口 → engine.yaml → 服务 → 鉴权自检 → 同步模型到 dsh。setup --engine 与首次 login 共用 */
-/** 返回引擎是否在运行（DSH_MODEL_SERVICE=none 时可能没跑） */
+/** 返回引擎是否在运行（DSH_CPAMC_SERVICE=none 时可能没跑） */
 export async function ensureEngine(ctx: Ctx, all: All, opts: { port?: number } = {}): Promise<boolean> {
   const { config, state, keys } = all
   if (config.proxy === undefined) {
@@ -194,7 +194,7 @@ export async function ensureEngine(ctx: Ctx, all: All, opts: { port?: number } =
   await saveAll(ctx, all)
   await applyEngineConfig(ctx, all)
   if (ctx.serviceDisabled) {
-    skip(L('已跳过系统服务（DSH_MODEL_SERVICE=none）', 'Skipped system service (DSH_MODEL_SERVICE=none)'))
+    skip(L('已跳过系统服务（DSH_CPAMC_SERVICE=none）', 'Skipped system service (DSH_CPAMC_SERVICE=none)'))
   } else {
     const svc = serviceFor(ctx)
     await svc.install()
@@ -207,7 +207,7 @@ export async function ensureEngine(ctx: Ctx, all: All, opts: { port?: number } =
       warn(L('引擎未运行（服务已跳过）', 'Engine not running (service skipped)'))
       return false
     }
-    throw new DshModelError('engine_unhealthy', L(`引擎没有在 127.0.0.1:${config.port} 上启动`, `Engine did not come up on 127.0.0.1:${config.port}`), L('查看日志：dsh-model logs', 'Check logs: dsh-model logs'))
+    throw new DshModelError('engine_unhealthy', L(`引擎没有在 127.0.0.1:${config.port} 上启动`, `Engine did not come up on 127.0.0.1:${config.port}`), L('查看日志：dsh-cpamc logs', 'Check logs: dsh-cpamc logs'))
   }
   const unauth = await unauthStatus(config.port)
   if (unauth !== 401) throw new DshModelError('auth_not_enforced', L(`不带 key 的请求返回了 ${unauth}（应为 401），已停止`, `Unauthenticated request returned ${unauth} (expected 401); stopping`))

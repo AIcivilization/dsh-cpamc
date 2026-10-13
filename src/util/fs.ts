@@ -1,7 +1,7 @@
 // util/fs.ts — 原子写、哈希、属主
 //
 // 所有落盘都走 atomicWrite：先写同目录临时文件再 rename，中途断电也不会留下半个文件。
-// vps 模式下 dsh-model 以 root 运行，但文件要归 dsh 用户，所以写入时可带 owner。
+// vps 模式下 dsh-cpamc 以 root 运行，但文件要归 dsh 用户，所以写入时可带 owner。
 
 import { createHash, randomBytes } from 'node:crypto'
 import { chown, chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'

@@ -16,7 +16,7 @@ import { bold, info, next, ok, skip } from '../util/output.js'
 import { DEFAULT_PUBLIC_PORT, closeFirewall, openFirewall, publicHost, siteBlock } from '../remote/public.js'
 
 const CADDYFILE = '/etc/caddy/Caddyfile'
-const CADDY_SNIPPET = '/etc/caddy/dsh-model.conf'
+const CADDY_SNIPPET = '/etc/caddy/dsh-cpamc.conf'
 const IMPORT_LINE = `import ${CADDY_SNIPPET}`
 const DOMAIN_RE = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i
 
@@ -29,7 +29,7 @@ export async function remote(ctx: Ctx, sub: string | undefined, opts: { via?: st
       await saveAll(ctx, all)
       return 0
     }
-    if (sub !== 'enable') throw new DshModelError('unknown_command', L('用法：dsh-model remote enable --via ssh|tailscale|caddy / remote disable', 'Usage: dsh-model remote enable --via ssh|tailscale|caddy / remote disable'))
+    if (sub !== 'enable') throw new DshModelError('unknown_command', L('用法：dsh-cpamc remote enable --via ssh|tailscale|caddy / remote disable', 'Usage: dsh-cpamc remote enable --via ssh|tailscale|caddy / remote disable'))
 
     const via = (opts.via ?? 'ssh') as RemoteMode
     if (all.state.remote && all.state.remote.mode !== 'off' && all.state.remote.mode !== via) await disable(ctx, all)
@@ -64,13 +64,13 @@ export async function remote(ctx: Ctx, sub: string | undefined, opts: { via?: st
       await enableCaddy(ctx, all, host, publicPort)
       all.config.remote.domain = host
       all.config.remote.publicPort = publicPort
-      ok(L(`对外端点已开通：https://${host}:${publicPort}/v1（只认 dsh-model 的 key）`, `Public endpoint enabled: https://${host}:${publicPort}/v1 (dsh-model keys only)`))
+      ok(L(`对外端点已开通：https://${host}:${publicPort}/v1（只认 dsh-cpamc 的 key）`, `Public endpoint enabled: https://${host}:${publicPort}/v1 (dsh-cpamc keys only)`))
     } else {
       throw new DshModelError('unknown_remote', L(`不支持的方式：${via}`, `Unsupported method: ${via}`))
     }
     all.config.remote.mode = via
     await saveAll(ctx, all)
-    next(L('为每台设备单独发一把 key：dsh-model key add <设备名>（丢了就 key revoke）', 'Issue one key per device: dsh-model key add <device> (revoke it if lost)'))
+    next(L('为每台设备单独发一把 key：dsh-cpamc key add <设备名>（丢了就 key revoke）', 'Issue one key per device: dsh-cpamc key add <device> (revoke it if lost)'))
     return 0
   })
 }

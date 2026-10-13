@@ -32,7 +32,7 @@ export async function saveAll(ctx: Ctx, all: All): Promise<void> {
 
 export function dshKey(keys: KeyStore): string {
   const k = findActive(keys, DSH_KEY_NAME)
-  if (!k) throw new DshModelError('not_setup', L('还没有初始化', 'Not set up yet'), L('先执行 dsh-model setup', 'Run dsh-model setup first'))
+  if (!k) throw new DshModelError('not_setup', L('还没有初始化', 'Not set up yet'), L('先执行 dsh-cpamc setup', 'Run dsh-cpamc setup first'))
   return k.key
 }
 
@@ -55,7 +55,7 @@ async function restartEngineBestEffort(ctx: Ctx, all: All): Promise<boolean> {
     await serviceFor(ctx).restart()
     return waitHealthy(all.config.port, 15_000)
   } catch (error) {
-    warn(L(`没能重启引擎（${isDshModelError(error) ? error.code : String(error)}）；稍后执行 dsh-model repair`, `Could not restart the engine (${isDshModelError(error) ? error.code : String(error)}); run dsh-model repair later`))
+    warn(L(`没能重启引擎（${isDshModelError(error) ? error.code : String(error)}）；稍后执行 dsh-cpamc repair`, `Could not restart the engine (${isDshModelError(error) ? error.code : String(error)}); run dsh-cpamc repair later`))
     return false
   }
 }
@@ -72,7 +72,7 @@ export async function syncModels(ctx: Ctx, all: All, opts: { before?: string[]; 
   // 每个来源只把挑中的模型写进 dsh（管理页勾选，或默认挑选）；统一端点照常提供全部
   const groups: DshGroup[] = []
   for (const c of candidates.values()) {
-    const picked = new Set(pickedFor(c.models.map((m) => ({ id: m.id, name: m.name, rate: m.rate })), all.config.dshModels?.[c.source]))
+    const picked = new Set(pickedFor(c.models.map((m) => ({ id: m.id, name: m.name, rate: m.rate })), all.config.dshCpamcs?.[c.source]))
     const models = c.models.filter((m) => picked.has(m.id)).map(({ rate: _r, ...m }) => m)
     if (models.length) groups.push({ providerId: c.providerId, displayName: c.label, models })
   }
@@ -93,7 +93,7 @@ export async function syncModels(ctx: Ctx, all: All, opts: { before?: string[]; 
         const usable = [...candidates.values()].reduce((n, c) => n + c.models.length, 0)
         ;(r.changed ? ok : skip)(L(`dsh（${r.location.profile}）显示 ${shown} 个模型（共 ${usable} 个可用）：${summary}`, `dsh (${r.location.profile}) shows ${shown} of ${usable} models: ${summary}`))
       } else {
-        skip(L('还没有登录任何上游，dsh 里暂时没有 dsh-model 的模型', 'No upstream logged in yet, so dsh has no dsh-model models for now'))
+        skip(L('还没有登录任何上游，dsh 里暂时没有 dsh-cpamc 的模型', 'No upstream logged in yet, so dsh has no dsh-cpamc models for now'))
       }
     }
   } catch (error) {
@@ -132,7 +132,7 @@ export async function dshCandidates(ctx: Ctx, all: All, ids?: string[]): Promise
   for (const id of list) {
     const m = meta.get(id)
     if (m?.group) {
-      push(m.group, `dsh-model-${m.group}`, m.groupLabel ?? m.group, {
+      push(m.group, `dsh-cpamc-${m.group}`, m.groupLabel ?? m.group, {
         id,
         name: m.dshName ?? m.displayName ?? id,
         ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
@@ -144,8 +144,8 @@ export async function dshCandidates(ctx: Ctx, all: All, ids?: string[]): Promise
     }
     const s = subs.models.get(id)
     if (s && subs.noAccess.has(s.source)) continue
-    if (s) push(s.source, `dsh-model-${s.source}`, s.label, { id, name: `${s.displayName ?? id} · ${L('订阅', 'subscription')}` })
-    else push('other', all.config.dsh.providerId, L('订阅（dsh-model）', 'Subscriptions (dsh-model)'), { id, name: id })
+    if (s) push(s.source, `dsh-cpamc-${s.source}`, s.label, { id, name: `${s.displayName ?? id} · ${L('订阅', 'subscription')}` })
+    else push('other', all.config.dsh.providerId, L('订阅（dsh-cpamc）', 'Subscriptions (dsh-cpamc)'), { id, name: id })
   }
   return out
 }

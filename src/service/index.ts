@@ -10,10 +10,10 @@ import { launchd } from './launchd.js'
 import { systemd } from './systemd.js'
 import { windowsService } from './windows.js'
 
-export const SERVICE_LABEL = 'com.dsh-model.engine'
-export const UNIT_NAME = 'dsh-model-engine.service'
-export const BRIDGE_LABEL = 'com.dsh-model.bridge'
-export const BRIDGE_UNIT = 'dsh-model-bridge.service'
+export const SERVICE_LABEL = 'com.dsh-cpamc.engine'
+export const UNIT_NAME = 'dsh-cpamc-engine.service'
+export const BRIDGE_LABEL = 'com.dsh-cpamc.bridge'
+export const BRIDGE_UNIT = 'dsh-cpamc-bridge.service'
 
 export type ServiceName = 'engine' | 'bridge'
 
@@ -56,16 +56,16 @@ export function serviceKind(ctx: Ctx): ServiceKind {
 
 /** bridge 是 Node 进程：用当前 node 的绝对路径，加上本包的入口 */
 function bridgeProgram(): string[] {
-  return [process.execPath, join(PKG_ROOT, 'bin', 'dsh-model.js'), 'bridge', 'run']
+  return [process.execPath, join(PKG_ROOT, 'bin', 'dsh-cpamc.js'), 'bridge', 'run']
 }
 
 /**
- * bridge 进程的环境：DSH_MODEL_HOME；有代理时让 Node 的 fetch 走代理（NODE_USE_ENV_PROXY，Node ≥ 22.21），
+ * bridge 进程的环境：DSH_CPAMC_HOME；有代理时让 Node 的 fetch 走代理（NODE_USE_ENV_PROXY，Node ≥ 22.21），
  * 但国内版 WorkBuddy 的域名与本机回环直连。
  */
 export function bridgeEnv(ctx: Ctx, proxy: string | null | undefined): Record<string, string> {
   return {
-    DSH_MODEL_HOME: ctx.paths.home,
+    DSH_CPAMC_HOME: ctx.paths.home,
     // 从 dsh 桌面版的管理页一键安装时，process.execPath 是 DeepSeek Harness（Electron）：服务里也要让它当 Node 跑
     ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
     ...(proxy ? { NODE_USE_ENV_PROXY: '1', HTTPS_PROXY: proxy, HTTP_PROXY: proxy, NO_PROXY: '127.0.0.1,localhost,::1,.tencent.com,.codebuddy.cn,.workbuddy.cn,.qq.com' } : {}),
@@ -82,7 +82,7 @@ export function serviceFor(ctx: Ctx, name: ServiceName = 'engine', proxy?: strin
     home: ctx.paths.home,
     ...(name === 'bridge' ? { env: bridgeEnv(ctx, proxy) } : {}),
   }
-  if (kind === 'windows') return windowsService({ ...common, label: name === 'engine' ? 'dsh-model-engine' : 'dsh-model-bridge', file: join(ctx.paths.home, 'services', `${name === 'engine' ? 'dsh-model-engine' : 'dsh-model-bridge'}.json`) })
+  if (kind === 'windows') return windowsService({ ...common, label: name === 'engine' ? 'dsh-cpamc-engine' : 'dsh-cpamc-bridge', file: join(ctx.paths.home, 'services', `${name === 'engine' ? 'dsh-cpamc-engine' : 'dsh-cpamc-bridge'}.json`) })
   if (kind === 'launchd') return launchd({ ...common, label, file: join(homedir(), 'Library/LaunchAgents', `${label}.plist`) })
   if (kind === 'systemd-user') return systemd('systemd-user', { ...common, label, file: join(homedir(), '.config/systemd/user', label) })
   return systemd('systemd-system', { ...common, label, file: join('/etc/systemd/system', label), user: ctx.runAs })

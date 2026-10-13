@@ -20,7 +20,7 @@ async function setup(patch: string | null, cred: string | null) {
   const keys: KeyStore = { keys: [] }
   const key = addKey(keys, 'dsh').key
   const state: State = { engine: { versions: [] } }
-  const input = { providerId: 'dsh-model', port: 8317, key, models, profile: null }
+  const input = { providerId: 'dsh-cpamc', port: 8317, key, models, profile: null }
   return { ...t, patchFile, credFile, keys, key, state, input }
 }
 
@@ -29,7 +29,7 @@ describe('connect / disconnect', () => {
     const s = await setup(fx('no-llm.yml'), fx('credentials.yml'))
     const r = await connectDsh(s.ctx, s.state, s.keys, s.input)
     expect(r.providerWritten).toBe(true)
-    expect(YAML.parse(await readFile(s.credFile, 'utf8')).refs.DSH_MODEL_API_KEY).toBe(s.key)
+    expect(YAML.parse(await readFile(s.credFile, 'utf8')).refs.DSH_CPAMC_API_KEY).toBe(s.key)
     // Windows 没有 Unix 权限位（总是 666）
     if (process.platform !== 'win32') expect((await stat(s.credFile)).mode & 0o777).toBe(0o600)
     const d = await disconnectDsh(s.ctx, s.state)
@@ -85,8 +85,8 @@ describe('connect / disconnect', () => {
     expect(await readFile(s.patchFile, 'utf8')).toBe(fx('no-llm.yml'))
   })
 
-  it('refuses to overwrite a foreign DSH_MODEL_API_KEY', async () => {
-    const s = await setup(fx('no-llm.yml'), fx('credentials.yml') + 'refs:\n  DSH_MODEL_API_KEY: someone-else\n')
+  it('refuses to overwrite a foreign DSH_CPAMC_API_KEY', async () => {
+    const s = await setup(fx('no-llm.yml'), fx('credentials.yml') + 'refs:\n  DSH_CPAMC_API_KEY: someone-else\n')
     await expect(connectDsh(s.ctx, s.state, s.keys, s.input)).rejects.toMatchObject({ code: 'credential_ref_conflict' })
   })
 
@@ -98,7 +98,7 @@ describe('connect / disconnect', () => {
 
   it('checks the dsh version range unless forced', async () => {
     const s = await setup(fx('no-llm.yml'), fx('credentials.yml'))
-    s.ctx.env.DSH_MODEL_DSH_VERSION = '0.3.1'
+    s.ctx.env.DSH_CPAMC_DSH_VERSION = '0.3.1'
     await expect(connectDsh(s.ctx, s.state, s.keys, s.input)).rejects.toMatchObject({ code: 'dsh_version_unsupported' })
     await expect(connectDsh(s.ctx, s.state, s.keys, { ...s.input, force: true })).resolves.toBeTruthy()
   })

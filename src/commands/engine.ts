@@ -25,7 +25,7 @@ export async function engine(ctx: Ctx, sub: string | undefined, arg: string | un
     const v = await currentVersion(ctx)
     const probed = v ? await probeBinaryVersion(currentBinary(ctx)) : null
     const manifest = await loadManifest()
-    info(L(`在用：${v ?? '未安装'}${probed && probed !== v ? `（二进制报告 ${probed}）` : ''}；本版 dsh-model 锁定：${manifest.version}`, `Active: ${v ?? 'not installed'}${probed && probed !== v ? ` (binary reports ${probed})` : ''}; pinned by this dsh-model: ${manifest.version}`))
+    info(L(`在用：${v ?? '未安装'}${probed && probed !== v ? `（二进制报告 ${probed}）` : ''}；本版 dsh-cpamc 锁定：${manifest.version}`, `Active: ${v ?? 'not installed'}${probed && probed !== v ? ` (binary reports ${probed})` : ''}; pinned by this dsh-cpamc: ${manifest.version}`))
     return 0
   }
   requireRootInVps(ctx)
@@ -46,7 +46,7 @@ async function upgrade(ctx: Ctx, requested: string | undefined): Promise<number>
   }
   let asset = version === manifest.version ? manifest.assets[target] : undefined
   if (!asset) {
-    warn(L(`v${version} 不在本版 dsh-model 的锁定清单里，校验值取自上游发布的 checksums.txt`, `v${version} is not pinned by this dsh-model; using the checksum from the upstream checksums.txt`))
+    warn(L(`v${version} 不在本版 dsh-cpamc 的锁定清单里，校验值取自上游发布的 checksums.txt`, `v${version} is not pinned by this dsh-cpamc; using the checksum from the upstream checksums.txt`))
     asset = await fetchUpstreamAsset(manifest, version, target)
   }
   await installVersion(ctx, version, asset)

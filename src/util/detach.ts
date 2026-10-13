@@ -18,7 +18,7 @@ spawn(job.cmd, job.args, { detached: true, windowsHide: true, cwd: job.cwd, stdi
 export function spawnDetached(cmd: string, args: string[], options: { log: string; env: NodeJS.ProcessEnv }): number | undefined {
   if (process.platform === 'win32') {
     // 中转进程用同一个 node（dsh 桌面版里是 Electron，env 里已带 ELECTRON_RUN_AS_NODE）
-    // 工作目录放在用户主目录：卸载要删 ~/.dsh-model，Windows 上进程的工作目录在里面时删不掉
+    // 工作目录放在用户主目录：卸载要删 ~/.dsh-cpamc，Windows 上进程的工作目录在里面时删不掉
     const relay = spawn(process.execPath, ['-e', RELAY, JSON.stringify({ cmd, args, log: options.log, cwd: homedir() })], { detached: true, windowsHide: true, cwd: homedir(), stdio: 'ignore', env: options.env })
     relay.unref()
     return undefined

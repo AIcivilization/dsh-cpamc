@@ -36,7 +36,7 @@ export function promptSecret(question: string): Promise<string> {
   })
 }
 
-/** 非交互：从管道读完整 stdin（dsh-model opencode key --stdin） */
+/** 非交互：从管道读完整 stdin（dsh-cpamc opencode key --stdin） */
 export async function readStdin(): Promise<string> {
   let data = ''
   for await (const chunk of process.stdin) data += chunk

@@ -57,9 +57,9 @@ const OPTIONS = {
 function help(): string {
   const ups = UPSTREAMS.map((u) => u.id).join('|')
   return L(
-    `dsh-model ${pkgVersion()} — 把你自己的 CLI 订阅接进 dsh（本机 OpenAI 兼容端点，默认鉴权，可干净卸载）
+    `dsh-cpamc ${pkgVersion()} — 把你自己的 CLI 订阅接进 dsh（本机 OpenAI 兼容端点，默认鉴权，可干净卸载）
 
-用法：dsh-model <命令> [选项]
+用法：dsh-cpamc <命令> [选项]
 
   setup [--profile P] [--proxy URL|none] [--skip-opencode] [--skip-workbuddy]
                                        一键安装统一端点，接入 OpenCode Zen（你的 key）与 WorkBuddy（自有 bridge），并接进 dsh；可重复执行
@@ -88,10 +88,10 @@ function help(): string {
   uninstall [--yes] [--keep-auth]      干净卸载
 
 通用选项：--lang zh|en  --json  --help  --version
-环境变量：DSH_HOME、DSH_MODEL_HOME、DSH_MODEL_LANG`,
-    `dsh-model ${pkgVersion()} — wire your own CLI subscriptions into dsh (local OpenAI-compatible endpoint, auth by default, clean uninstall)
+环境变量：DSH_HOME、DSH_CPAMC_HOME、DSH_CPAMC_LANG`,
+    `dsh-cpamc ${pkgVersion()} — wire your own CLI subscriptions into dsh (local OpenAI-compatible endpoint, auth by default, clean uninstall)
 
-Usage: dsh-model <command> [options]
+Usage: dsh-cpamc <command> [options]
 
   setup [--profile P] [--proxy URL|none] [--skip-opencode] [--skip-workbuddy]
                                        Install the unified endpoint, connect OpenCode Zen (your key) and WorkBuddy (own bridge), wire into dsh; idempotent
@@ -120,7 +120,7 @@ Usage: dsh-model <command> [options]
   uninstall [--yes] [--keep-auth]      Clean uninstall
 
 Global: --lang zh|en  --json  --help  --version
-Env: DSH_HOME, DSH_MODEL_HOME, DSH_MODEL_LANG`,
+Env: DSH_HOME, DSH_CPAMC_HOME, DSH_CPAMC_LANG`,
   )
 }
 
@@ -160,10 +160,10 @@ export async function main(argv: string[]): Promise<number> {
         return await bridge(ctx, a1)
       case 'login':
         // 统一走守护进程：链接 + 码 / 贴回跳转地址，服务器上不需要浏览器（设计 §14.2）
-        if (!a1) throw new Error(L('用法：dsh-model login <来源>（dsh-model sources 查看）', 'Usage: dsh-model login <source> (see dsh-model sources)'))
+        if (!a1) throw new Error(L('用法：dsh-cpamc login <来源>（dsh-cpamc sources 查看）', 'Usage: dsh-cpamc login <source> (see dsh-cpamc sources)'))
         return await enableInteractive(ctx, a1, { acceptRisk: o['accept-risk'] })
       case 'logout':
-        if (!a1) throw new Error(L('用法：dsh-model logout <来源>', 'Usage: dsh-model logout <source>'))
+        if (!a1) throw new Error(L('用法：dsh-cpamc logout <来源>', 'Usage: dsh-cpamc logout <source>'))
         return await source(ctx, 'logout', a1, {})
       case 'sources':
         return await sources(ctx, { all: o.all })
@@ -204,7 +204,7 @@ export async function main(argv: string[]): Promise<number> {
         return await selfUpdate(ctx, { to: o.to })
       default:
         fail(L(`未知命令：${cmd}`, `Unknown command: ${cmd}`))
-        console.log(dim(L('查看帮助：dsh-model --help', 'See: dsh-model --help')))
+        console.log(dim(L('查看帮助：dsh-cpamc --help', 'See: dsh-cpamc --help')))
         return 2
     }
   } catch (error) {
@@ -213,7 +213,7 @@ export async function main(argv: string[]): Promise<number> {
     } else {
       fail((error as Error).message)
       if (isDshModelError(error) && error.hint) console.error(dim(`  ${error.hint}`))
-      if (!isDshModelError(error) && process.env.DSH_MODEL_DEBUG) console.error((error as Error).stack)
+      if (!isDshModelError(error) && process.env.DSH_CPAMC_DEBUG) console.error((error as Error).stack)
     }
     return 1
   }

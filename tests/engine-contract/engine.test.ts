@@ -36,16 +36,16 @@ describe('engine contract (real binary)', () => {
   const saved = { ...process.env }
 
   beforeAll(async () => {
-    t = await tempCtx({ DSH_MODEL_ENGINE_ARCHIVE: await cachedArchive() })
+    t = await tempCtx({ DSH_CPAMC_ENGINE_ARCHIVE: await cachedArchive() })
     Object.assign(process.env, {
-      DSH_MODEL_MODE: 'local',
-      DSH_MODEL_HOME: t.ctx.paths.home,
+      DSH_CPAMC_MODE: 'local',
+      DSH_CPAMC_HOME: t.ctx.paths.home,
       DSH_HOME: t.ctx.dshHome,
-      DSH_MODEL_DSH_VERSION: '0.2.0-rc.2',
-      DSH_MODEL_SERVICE: 'none',
-      DSH_MODEL_ENGINE_ARCHIVE: t.ctx.env.DSH_MODEL_ENGINE_ARCHIVE,
-      DSH_MODEL_LANG: 'en',
-      DSH_MODEL_NO_APP_DISCOVERY: '1',
+      DSH_CPAMC_DSH_VERSION: '0.2.0-rc.2',
+      DSH_CPAMC_SERVICE: 'none',
+      DSH_CPAMC_ENGINE_ARCHIVE: t.ctx.env.DSH_CPAMC_ENGINE_ARCHIVE,
+      DSH_CPAMC_LANG: 'en',
+      DSH_CPAMC_NO_APP_DISCOVERY: '1',
     })
     await writeFile(join(t.profileDir, 'cordis.patch.yml'), await fixture('no-llm.yml'), { mode: 0o600 })
     await writeFile(join(t.ctx.dshHome, '.credentials.yaml'), await fixture('credentials.yml'), { mode: 0o600 })
@@ -97,7 +97,7 @@ describe('engine contract (real binary)', () => {
   it('connect-dsh with no logins writes the key ref but no provider', async () => {
     expect(await main(['connect-dsh'])).toBe(0)
     const cred = await readFile(join(t.ctx.dshHome, '.credentials.yaml'), 'utf8')
-    expect(cred).toContain('DSH_MODEL_API_KEY: dshm_')
+    expect(cred).toContain('DSH_CPAMC_API_KEY: dshc_')
     expect(await readFile(join(t.profileDir, 'cordis.patch.yml'), 'utf8')).toBe(await fixture('no-llm.yml'))
     expect(await main(['doctor', '--json'])).toBe(0)
   }, 30_000)

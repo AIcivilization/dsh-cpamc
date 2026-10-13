@@ -1,7 +1,7 @@
 // commands/sources.ts — 来源开关与登录（CLI 版；dsh 插件页调同一套守护进程接口）
-//   dsh-model sources
-//   dsh-model source enable|disable|logout <来源> [--accept-risk]
-//   dsh-model stats
+//   dsh-cpamc sources
+//   dsh-cpamc source enable|disable|logout <来源> [--accept-risk]
+//   dsh-cpamc stats
 
 import { createInterface } from 'node:readline'
 import type { Ctx } from '../context.js'
@@ -91,13 +91,13 @@ export async function sources(ctx: Ctx, opts: { all?: boolean } = {}): Promise<n
       for (const line of usageLines(s)) info(line)
     }
   }
-  info(dim(L('\n打开：dsh-model source enable <来源>   关闭：dsh-model source disable <来源>   高风险来源（Claude、Antigravity）：dsh-model sources --all', '\nTurn on: dsh-model source enable <source>   off: dsh-model source disable <source>   High-risk sources (Claude, Antigravity): dsh-model sources --all')))
+  info(dim(L('\n打开：dsh-cpamc source enable <来源>   关闭：dsh-cpamc source disable <来源>   高风险来源（Claude、Antigravity）：dsh-cpamc sources --all', '\nTurn on: dsh-cpamc source enable <source>   off: dsh-cpamc source disable <source>   High-risk sources (Claude, Antigravity): dsh-cpamc sources --all')))
   return 0
 }
 
 export async function source(ctx: Ctx, sub: string | undefined, id: string | undefined, opts: { acceptRisk?: boolean }): Promise<number> {
   if (!sub || !id || !['enable', 'disable', 'logout', 'on', 'off'].includes(sub)) {
-    throw new DshModelError('usage', L('用法：dsh-model source enable|disable|logout <来源>', 'Usage: dsh-model source enable|disable|logout <source>'))
+    throw new DshModelError('usage', L('用法：dsh-cpamc source enable|disable|logout <来源>', 'Usage: dsh-cpamc source enable|disable|logout <source>'))
   }
   if (sub === 'disable' || sub === 'off') {
     await control(ctx, 'POST', `/sources/${id}/disable`)

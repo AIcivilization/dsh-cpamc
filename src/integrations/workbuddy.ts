@@ -1,7 +1,7 @@
-// integrations/workbuddy.ts — WorkBuddy 经 dsh-model 自己的 bridge 接入统一端点（设计 §1.3.1）
+// integrations/workbuddy.ts — WorkBuddy 经 dsh-cpamc 自己的 bridge 接入统一端点（设计 §1.3.1）
 //
-// bridge 是常驻服务（com.dsh-model.bridge），读 WorkBuddy App 的登录态，对引擎提供 OpenAI 兼容接口。
-// v0.2.0 曾经通过 dsh 的插件管理装 dsh-workbuddy-connect：removeWorkbuddyPlugin 负责把 dsh-model 装的那份移除。
+// bridge 是常驻服务（com.dsh-cpamc.bridge），读 WorkBuddy App 的登录态，对引擎提供 OpenAI 兼容接口。
+// v0.2.0 曾经通过 dsh 的插件管理装 dsh-workbuddy-connect：removeWorkbuddyPlugin 负责把 dsh-cpamc 装的那份移除。
 
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -20,8 +20,8 @@ export const WORKBUDDY_PLUGIN = 'dsh-workbuddy-connect'
 
 export function riskNotice(): string {
   return L(
-    'WorkBuddy 接入说明：dsh-model 的 bridge 会读取并解密 WorkBuddy App 本机保存的登录凭据（需运行 App 自带的程序取密钥），并以 WorkBuddy 客户端的身份调用其接口。这绕开了 WorkBuddy 自己的凭据保护，可能不符合其服务条款，账号存在风险；WorkBuddy 升级加密方式时可能失效。刷新后的令牌只存 dsh-model 自己的副本，不改写 App 的文件。仅限你本人自用。',
-    "WorkBuddy notice: dsh-model's bridge reads and decrypts the WorkBuddy app's locally stored sign-in (running the app's own binary to obtain the key) and calls its API as the WorkBuddy client. This bypasses WorkBuddy's own credential protection, may conflict with its terms, and puts the account at risk; it may break when WorkBuddy changes its encryption. Refreshed tokens are kept only in dsh-model's own copy; the app's files are never rewritten. Personal use only.",
+    'WorkBuddy 接入说明：dsh-cpamc 的 bridge 会读取并解密 WorkBuddy App 本机保存的登录凭据（需运行 App 自带的程序取密钥），并以 WorkBuddy 客户端的身份调用其接口。这绕开了 WorkBuddy 自己的凭据保护，可能不符合其服务条款，账号存在风险；WorkBuddy 升级加密方式时可能失效。刷新后的令牌只存 dsh-cpamc 自己的副本，不改写 App 的文件。仅限你本人自用。',
+    "WorkBuddy notice: dsh-cpamc's bridge reads and decrypts the WorkBuddy app's locally stored sign-in (running the app's own binary to obtain the key) and calls its API as the WorkBuddy client. This bypasses WorkBuddy's own credential protection, may conflict with its terms, and puts the account at risk; it may break when WorkBuddy changes its encryption. Refreshed tokens are kept only in dsh-cpamc's own copy; the app's files are never rewritten. Personal use only.",
   )
 }
 
@@ -51,8 +51,8 @@ export async function enableWorkbuddy(ctx: Ctx, all: All): Promise<CatalogFile[]
   if (!variants.length) {
     skip(
       ctx.platform === 'darwin'
-        ? L('没检测到 WorkBuddy 桌面 App，也没有用 dsh-model 登录过；可执行 dsh-model workbuddy login', 'No WorkBuddy desktop app and no dsh-model sign-in; run dsh-model workbuddy login')
-        : L('服务器上没有 WorkBuddy 桌面 App：执行 dsh-model workbuddy login，在任意浏览器里授权即可', 'No WorkBuddy desktop app on this server: run dsh-model workbuddy login and approve in any browser'),
+        ? L('没检测到 WorkBuddy 桌面 App，也没有用 dsh-cpamc 登录过；可执行 dsh-cpamc workbuddy login', 'No WorkBuddy desktop app and no dsh-cpamc sign-in; run dsh-cpamc workbuddy login')
+        : L('服务器上没有 WorkBuddy 桌面 App：执行 dsh-cpamc workbuddy login，在任意浏览器里授权即可', 'No WorkBuddy desktop app on this server: run dsh-cpamc workbuddy login and approve in any browser'),
     )
     return []
   }
@@ -68,9 +68,9 @@ export async function enableWorkbuddy(ctx: Ctx, all: All): Promise<CatalogFile[]
   const cats = await waitCatalogs(ctx, since, variants.length)
   for (const c of cats) {
     if (c.signedIn) ok(L(`${c.label}：已登录${c.nickname ? `（${c.nickname}）` : ''}，${c.models.length} 个模型（前缀 ${c.prefix}/）`, `${c.label}: signed in${c.nickname ? ` (${c.nickname})` : ''}, ${c.models.length} models (prefix ${c.prefix}/)`))
-    else warn(L(`${c.label}：未登录${c.error ? `（${c.error}）` : ''}。在 App 里登录后，bridge 会在 30 分钟内自动接入，或执行 dsh-model workbuddy refresh`, `${c.label}: not signed in${c.error ? ` (${c.error})` : ''}. After signing in to the app, the bridge picks it up within 30 minutes, or run dsh-model workbuddy refresh`))
+    else warn(L(`${c.label}：未登录${c.error ? `（${c.error}）` : ''}。在 App 里登录后，bridge 会在 30 分钟内自动接入，或执行 dsh-cpamc workbuddy refresh`, `${c.label}: not signed in${c.error ? ` (${c.error})` : ''}. After signing in to the app, the bridge picks it up within 30 minutes, or run dsh-cpamc workbuddy refresh`))
   }
-  if (cats.length < variants.length) warn(L('部分 WorkBuddy 目录还没读到，稍后执行 dsh-model workbuddy refresh', 'Some WorkBuddy catalogs are not ready yet; run dsh-model workbuddy refresh later'))
+  if (cats.length < variants.length) warn(L('部分 WorkBuddy 目录还没读到，稍后执行 dsh-cpamc workbuddy refresh', 'Some WorkBuddy catalogs are not ready yet; run dsh-cpamc workbuddy refresh later'))
   return cats
 }
 
@@ -93,7 +93,7 @@ export async function refreshBridge(ctx: Ctx): Promise<boolean> {
   }
 }
 
-// —— v0.2.0 迁移：移除 dsh-model 通过 dsh 插件管理装的 dsh-workbuddy-connect ——
+// —— v0.2.0 迁移：移除 dsh-cpamc 通过 dsh 插件管理装的 dsh-workbuddy-connect ——
 
 export async function removeWorkbuddyPlugin(ctx: Ctx, all: All): Promise<boolean> {
   const rec = all.state.plugins?.find((p) => p.name === WORKBUDDY_PLUGIN)

@@ -1,6 +1,6 @@
-// daemon/core.ts — dsh-model 守护进程的核心（设计 §14）
+// daemon/core.ts — dsh-cpamc 守护进程的核心（设计 §14）
 //
-// 跑在 bridge 服务进程里（com.dsh-model.bridge / dsh-model-bridge.service），所有操作都不需要 root：
+// 跑在 bridge 服务进程里（com.dsh-cpamc.bridge / dsh-cpamc-bridge.service），所有操作都不需要 root：
 // 引擎配置与 dsh 配置在 vps 模式下归 dsh 用户，引擎热重载，dsh 热加载。
 // 职责：来源状态与开关、登录会话（引擎 OAuth / WorkBuddy 自有登录 / OpenCode key）、key 管理、用量统计。
 // CLI 与 dsh 插件都只通过 /control/* 调这里，逻辑只有一份。
@@ -338,7 +338,7 @@ export class Daemon {
     await this.resync()
   }
 
-  /** 退出登录：删掉 dsh-model 保存的凭据（桌面 App 自己的登录不动） */
+  /** 退出登录：删掉 dsh-cpamc 保存的凭据（桌面 App 自己的登录不动） */
   async logout(id: string): Promise<void> {
     const def = mustSource(id)
     if (def.kind === 'engine') {
@@ -701,8 +701,8 @@ export class Daemon {
       canManage: !vps || (await adminInstalled()),
       ...(this.selfJob ? { job: { action: this.selfJob.action, startedAt: this.selfJob.startedAt, log: log.replace(/\x1b\[[0-9;]*m/g, '').slice(-6000) } } : {}),
       commands: vps
-        ? { update: 'sudo npm install -g dsh-model@latest && sudo dsh-model setup', uninstall: 'sudo dsh-model uninstall' }
-        : { update: 'dsh-model update', uninstall: 'dsh-model uninstall' },
+        ? { update: 'sudo npm install -g dsh-cpamc@latest && sudo dsh-cpamc setup', uninstall: 'sudo dsh-cpamc uninstall' }
+        : { update: 'dsh-cpamc update', uninstall: 'dsh-cpamc uninstall' },
     }
   }
 
@@ -718,21 +718,21 @@ export class Daemon {
     }
     const log = selfJobLog(this.ctx, action)
     if (this.ctx.mode === 'vps') {
-      // 守护进程是 dsh 用户：写请求单，由 dsh-model-admin（root）执行
-      if (!(await adminInstalled())) throw new DshModelError('needs_root', L('服务器上要 root 权限，请在终端里执行命令（重跑一次 sudo dsh-model setup 之后就能在页面上点）', 'On the server this needs root; run the command in a terminal (after re-running sudo dsh-model setup, the buttons work here)'))
+      // 守护进程是 dsh 用户：写请求单，由 dsh-cpamc-admin（root）执行
+      if (!(await adminInstalled())) throw new DshModelError('needs_root', L('服务器上要 root 权限，请在终端里执行命令（重跑一次 sudo dsh-cpamc setup 之后就能在页面上点）', 'On the server this needs root; run the command in a terminal (after re-running sudo dsh-cpamc setup, the buttons work here)'))
       const req: AdminRequest = { action, keepAuth: opts.keepAuth === true, lang: lang() }
       await atomicWrite(adminRequestPath(this.ctx), JSON.stringify(req), { mode: 0o600 })
       this.selfJob = { action, startedAt: new Date().toISOString(), log }
-      log_(`daemon: requested ${action} from dsh-model-admin`)
+      log_(`daemon: requested ${action} from dsh-cpamc-admin`)
       return { started: true, log }
     }
     const args = action === 'update' ? ['update'] : ['uninstall', '--yes', '--remove-plugin', ...(opts.keepAuth ? ['--keep-auth'] : [])]
-    const cmd = [process.execPath, join(PKG_ROOT, 'bin', 'dsh-model.js'), ...args, '--lang', lang()]
+    const cmd = [process.execPath, join(PKG_ROOT, 'bin', 'dsh-cpamc.js'), ...args, '--lang', lang()]
     const env = { ...process.env, NO_COLOR: '1', NODE_NO_WARNINGS: '1', ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) }
     let pid: number | undefined
     if (this.ctx.platform === 'linux' && (await which('systemd-run'))) {
       // Linux 的 systemd --user 重启服务会杀掉整个 cgroup：交给 systemd-run 另起一个
-      const keepEnv = ['PATH', 'HOME', 'LANG', 'DSH_HOME', 'DSH_MODEL_HOME', 'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY'].filter((k) => process.env[k]).map((k) => `--setenv=${k}=${process.env[k]}`)
+      const keepEnv = ['PATH', 'HOME', 'LANG', 'DSH_HOME', 'DSH_CPAMC_HOME', 'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY'].filter((k) => process.env[k]).map((k) => `--setenv=${k}=${process.env[k]}`)
       const viaSystemd = ['--user', '--collect', '--quiet', ...keepEnv, '--setenv=NO_COLOR=1', '/bin/sh', '-c', 'log="$1"; shift; exec "$@" >"$log" 2>&1', 'sh', log, ...cmd]
       spawn('systemd-run', viaSystemd, { detached: true, stdio: 'ignore', env }).unref()
     } else {
@@ -749,7 +749,7 @@ export class Daemon {
     const all = await loadAll(this.ctx)
     const c = (await dshCandidates(this.ctx, all)).get(def.id)
     const list = (c?.models ?? []).map((m) => ({ id: m.id, name: m.name, rate: m.rate }))
-    const chosen = all.config.dshModels?.[def.id]
+    const chosen = all.config.dshCpamcs?.[def.id]
     const picked = new Set(pickedFor(list, chosen))
     const rec = new Set(defaultPick(list))
     return { custom: chosen !== undefined, models: list.map((m) => ({ id: m.id, name: m.name, selected: picked.has(m.id), recommended: rec.has(m.id) })) }
@@ -763,10 +763,10 @@ export class Daemon {
     }
     await withLock(this.ctx, async () => {
       const all = await loadAll(this.ctx)
-      const next = { ...all.config.dshModels }
+      const next = { ...all.config.dshCpamcs }
       if (models === null) delete next[def.id]
       else next[def.id] = [...new Set(models)]
-      all.config.dshModels = Object.keys(next).length ? next : undefined
+      all.config.dshCpamcs = Object.keys(next).length ? next : undefined
       await saveAll(this.ctx, all)
     })
     await this.resync()

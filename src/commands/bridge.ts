@@ -1,4 +1,4 @@
-// commands/bridge.ts — dsh-model bridge run（守护进程入口，系统服务调用，常驻）与 bridge status
+// commands/bridge.ts — dsh-cpamc bridge run（守护进程入口，系统服务调用，常驻）与 bridge status
 //
 // 守护进程 = WorkBuddy bridge（OpenAI 兼容转发）+ 控制接口（来源开关、登录、key、统计，设计 §14）。
 
@@ -21,7 +21,7 @@ export async function bridge(ctx: Ctx, sub: string | undefined): Promise<number>
 async function status(ctx: Ctx): Promise<number> {
   const cfg = await loadBridgeConfig(ctx.paths.home)
   if (!cfg) {
-    info(L('守护进程未配置（dsh-model setup）', 'Daemon not configured (dsh-model setup)'))
+    info(L('守护进程未配置（dsh-cpamc setup）', 'Daemon not configured (dsh-cpamc setup)'))
     return 1
   }
   try {
@@ -38,7 +38,7 @@ async function status(ctx: Ctx): Promise<number> {
 
 async function run(ctx: Ctx): Promise<number> {
   const cfg = await loadBridgeConfig(ctx.paths.home)
-  if (!cfg) throw new DshModelError('bridge_not_configured', L('守护进程未配置，先执行 dsh-model setup', 'Daemon not configured; run dsh-model setup first'))
+  if (!cfg) throw new DshModelError('bridge_not_configured', L('守护进程未配置，先执行 dsh-cpamc setup', 'Daemon not configured; run dsh-cpamc setup first'))
   const daemon = new Daemon(ctx)
   await daemon.start()
   log(`daemon: products ${daemon.runtimes.map((r) => r.label).join(', ') || '(none)'}`)

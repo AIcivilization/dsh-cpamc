@@ -64,7 +64,7 @@ export async function repair(ctx: Ctx): Promise<number> {
       all.state.service = { kind: svc.kind, file: svc.spec.file, label: svc.spec.label }
       await saveAll(ctx, all)
       await svc.restart()
-      if (!(await waitHealthy(all.config.port, 15_000))) throw new DshModelError('engine_unhealthy', L('引擎没有启动，查看 dsh-model logs', 'Engine did not start; see dsh-model logs'))
+      if (!(await waitHealthy(all.config.port, 15_000))) throw new DshModelError('engine_unhealthy', L('引擎没有启动，查看 dsh-cpamc logs', 'Engine did not start; see dsh-cpamc logs'))
       ok(L('服务已重装并重启', 'Service reinstalled and restarted'))
       await ensureDaemon(ctx, all)
       if (ctx.mode === 'vps') await installAdmin(ctx)

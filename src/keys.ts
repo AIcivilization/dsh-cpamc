@@ -23,7 +23,7 @@ export interface KeyStore {
 }
 
 export function generateKey(): string {
-  return `dshm_${randomBytes(32).toString('base64url')}`
+  return `dshc_${randomBytes(32).toString('base64url')}`
 }
 
 export async function loadKeys(ctx: Ctx): Promise<KeyStore> {
@@ -47,7 +47,7 @@ export function addKey(store: KeyStore, name: string): KeyEntry {
     throw new DshModelError('invalid_key_name', L(`key 名称不合法：${name}（字母数字开头，可含 . _ -，最长 40）`, `Invalid key name: ${name} (alphanumeric start, may contain . _ -, max 40)`))
   }
   if (findActive(store, name)) {
-    throw new DshModelError('key_exists', L(`已经有一把叫 ${name} 的 key`, `A key named ${name} already exists`), L(`要换新的用：dsh-model key rotate ${name}`, `To replace it: dsh-model key rotate ${name}`))
+    throw new DshModelError('key_exists', L(`已经有一把叫 ${name} 的 key`, `A key named ${name} already exists`), L(`要换新的用：dsh-cpamc key rotate ${name}`, `To replace it: dsh-cpamc key rotate ${name}`))
   }
   const entry: KeyEntry = { name, key: generateKey(), createdAt: new Date().toISOString() }
   store.keys.push(entry)

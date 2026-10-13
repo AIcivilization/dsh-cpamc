@@ -57,7 +57,7 @@ describe('misc', () => {
     expect(() => getUpstream('nope')).toThrow()
   })
   it('redacts keys', () => {
-    expect(redactKey('dshm_abcdefghijklmnopqrstuvwxyz1234')).toBe('dshm_…1234')
+    expect(redactKey('dshc_abcdefghijklmnopqrstuvwxyz1234')).toBe('dshc_…1234')
   })
   it('switches language', () => {
     initLang('en')

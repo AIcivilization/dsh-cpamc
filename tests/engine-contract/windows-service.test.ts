@@ -36,8 +36,8 @@ describe.skipIf(process.platform !== 'win32')('windows service (real Run key + w
   })
 
   it('installs, starts hidden, restarts after the program exits, and uninstalls cleanly', async () => {
-    home = await mkdtemp(join(tmpdir(), 'dsh-model-svc-'))
-    const label = `dsh-model-test-${PORT}`
+    home = await mkdtemp(join(tmpdir(), 'dsh-cpamc-svc-'))
+    const label = `dsh-cpamc-test-${PORT}`
     svc = windowsService({
       label,
       file: join(home, 'services', `${label}.json`),

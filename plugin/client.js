@@ -1,13 +1,13 @@
 /* global window, document, fetch, navigator, setTimeout, clearTimeout, setInterval, clearInterval */
-// plugin/client.js — dsh-model 的设置页（设计 §14）
+// plugin/client.js — dsh-cpamc 的设置页（设计 §14）
 //
 // 手写单文件 bundle，没有构建链：由 dsh web 客户端的 ModuleLoader 注入（写法照 dsh-vps-manager）。
-// 挂在「设置 → dsh-model」：来源开关 + 订阅用量、API key 状态、模型统计。
-// 界面只通过 /api-dsh-model/call 调宿主，宿主再转给 dsh-model 守护进程；页面拿不到任何密钥。
+// 挂在「设置 → dsh-cpamc」：来源开关 + 订阅用量、API key 状态、模型统计。
+// 界面只通过 /api-dsh-cpamc/call 调宿主，宿主再转给 dsh-cpamc 守护进程；页面拿不到任何密钥。
 // 硬约束：界面崩了不能影响 dsh，注册一律包在 try/catch 里。
 
 window.__ModuleLoader__.load({
-  id: 'dsh-model',
+  id: 'dsh-cpamc',
   factory: (require) => {
     const module = { exports: {} }
     const React = require('react')
@@ -22,17 +22,17 @@ window.__ModuleLoader__.load({
     const L = (zh, en) => (isZh() ? zh : en)
 
     // —— 调宿主 ——
-    let token = window.__DSH_MODEL_TOKEN__ || ''
+    let token = window.__DSH_CPAMC_TOKEN__ || ''
     async function refreshToken() {
-      const r = await fetch('/api-dsh-model/token', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', credentials: 'same-origin' })
+      const r = await fetch('/api-dsh-cpamc/token', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', credentials: 'same-origin' })
       const j = await r.json().catch(() => ({}))
       if (j.token) token = j.token
     }
     async function api(method, path, body, retried) {
-      const r = await fetch('/api-dsh-model/call', {
+      const r = await fetch('/api-dsh-cpamc/call', {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'content-type': 'application/json', 'x-dsh-model-token': token },
+        headers: { 'content-type': 'application/json', 'x-dsh-cpamc-token': token },
         body: JSON.stringify({ method, path, lang: isZh() ? 'zh' : 'en', ...(body !== undefined ? { body } : {}) }),
       })
       const j = await r.json().catch(() => ({}))
@@ -210,7 +210,7 @@ window.__ModuleLoader__.load({
       if (!endpoints) return null
       const rows = [
         ...(endpoints.public ? [{ id: 'public', name: L('外网地址', 'Public'), url: endpoints.public, note: L('你的电脑、手机或其他软件用这个', 'Use this from your computer, phone or other tools') }] : []),
-        { id: 'local', name: L('本机地址', 'Local'), url: endpoints.local, note: endpoints.public ? L('只在这台服务器上能用（dsh 自己用的就是它）', 'Only works on this server (dsh itself uses it)') : L('只在本机能用；要从别的设备访问，在服务器上执行 dsh-model remote enable', 'Only works on this machine; to reach it from other devices run dsh-model remote enable') },
+        { id: 'local', name: L('本机地址', 'Local'), url: endpoints.local, note: endpoints.public ? L('只在这台服务器上能用（dsh 自己用的就是它）', 'Only works on this server (dsh itself uses it)') : L('只在本机能用；要从别的设备访问，在服务器上执行 dsh-cpamc remote enable', 'Only works on this machine; to reach it from other devices run dsh-cpamc remote enable') },
       ]
       return h('div', { style: S.section },
         h('div', { style: S.h }, L('访问地址', 'Endpoint')),
@@ -307,7 +307,7 @@ window.__ModuleLoader__.load({
     }
 
     // —— 来源 ——
-    const RISKY_KEY = 'dsh-model.showRisky'
+    const RISKY_KEY = 'dsh-cpamc.showRisky'
     const readRisky = () => {
       try { return window.localStorage.getItem(RISKY_KEY) === '1' } catch { return false }
     }
@@ -512,10 +512,10 @@ window.__ModuleLoader__.load({
         setBusy(true)
         setRes(null)
         try {
-          const r = await fetch('/api-dsh-model/setup', {
+          const r = await fetch('/api-dsh-cpamc/setup', {
             method: 'POST',
             credentials: 'same-origin',
-            headers: { 'content-type': 'application/json', 'x-dsh-model-token': token },
+            headers: { 'content-type': 'application/json', 'x-dsh-cpamc-token': token },
             body: JSON.stringify({ action, lang: isZh() ? 'zh' : 'en' }),
           })
           const j = await r.json().catch(() => ({}))
@@ -528,14 +528,14 @@ window.__ModuleLoader__.load({
           setBusy(false)
         }
       }
-      const cmds = notInstalled ? ['npm install -g dsh-model', 'dsh-model setup'] : ['dsh-model repair']
-      const vpsCmds = notInstalled ? ['sudo npm install -g dsh-model', 'sudo dsh-model setup'] : ['sudo dsh-model repair']
+      const cmds = notInstalled ? ['npm install -g dsh-cpamc', 'dsh-cpamc setup'] : ['dsh-cpamc repair']
+      const vpsCmds = notInstalled ? ['sudo npm install -g dsh-cpamc', 'sudo dsh-cpamc setup'] : ['sudo dsh-cpamc repair']
       const cmdBlock = (list) => h('div', { style: { ...S.card, padding: '8px 12px', marginTop: 8 } }, list.map((c) => h('div', { key: c, style: { ...S.line, minHeight: 30 } }, h('code', { style: { ...S.mono, ...S.grow } }, c), h(CopyButton, { get: c }))))
       return h('div', { style: { color: C.text, maxWidth: 820 } },
         h('div', { style: S.section },
-          h('div', { style: S.h }, notInstalled ? L('还差一步：在这台机器上装好 dsh-model', 'One more step: set up dsh-model on this machine') : L('dsh-model 的服务没在运行', 'The dsh-model service is not running')),
+          h('div', { style: S.h }, notInstalled ? L('还差一步：在这台机器上装好 dsh-cpamc', 'One more step: set up dsh-cpamc on this machine') : L('dsh-cpamc 的服务没在运行', 'The dsh-cpamc service is not running')),
           h('p', { style: S.note }, notInstalled
-            ? L('这个页面只是管理界面；模型由 dsh-model 在本机运行的服务提供（统一端点、WorkBuddy bridge、登录与用量）。装好后，来源、key 和模型都在这里管理。', 'This page is only the control panel; models are served by dsh-model\'s local service (the unified endpoint, WorkBuddy bridge, sign-ins and usage). Once it is set up, manage sources, keys and models here.')
+            ? L('这个页面只是管理界面；模型由 dsh-cpamc 在本机运行的服务提供（统一端点、WorkBuddy bridge、登录与用量）。装好后，来源、key 和模型都在这里管理。', 'This page is only the control panel; models are served by dsh-cpamc\'s local service (the unified endpoint, WorkBuddy bridge, sign-ins and usage). Once it is set up, manage sources, keys and models here.')
             : L('可能是电脑重启后服务没起来，或者刚升级。修复会按记录重新注册并启动服务。', 'The service may not have started after a reboot, or was just upgraded. Repair re-registers and starts it from the saved records.')),
           res?.vps ? h('div', null,
             h('p', { style: { ...S.note, color: C.text } }, L('这是 dsh-vps 服务器：安装要 root 权限，请在服务器终端里执行：', 'This is a dsh-vps server: setup needs root, so run this in a server terminal:')),
@@ -573,12 +573,12 @@ window.__ModuleLoader__.load({
       }, [])
       if (!info) return null
       if (!info.version) {
-        const cmd = 'npm install -g dsh-model && dsh-model setup'
+        const cmd = 'npm install -g dsh-cpamc && dsh-cpamc setup'
         return h('div', { style: S.section },
           h('div', { style: S.h }, L('关于', 'About')),
           h('div', { style: { ...S.card, padding: '12px 14px' } },
             h('div', { style: S.meta }, info.old
-              ? L('这台机器上的 dsh-model 服务比这个页面旧，不支持在页面上更新。在终端执行一次（服务器上加 sudo），之后就能在这里更新和卸载：', 'The dsh-model service on this machine is older than this page and cannot update from here. Run this once in a terminal (with sudo on a server); after that you can update and uninstall here:')
+              ? L('这台机器上的 dsh-cpamc 服务比这个页面旧，不支持在页面上更新。在终端执行一次（服务器上加 sudo），之后就能在这里更新和卸载：', 'The dsh-cpamc service on this machine is older than this page and cannot update from here. Run this once in a terminal (with sudo on a server); after that you can update and uninstall here:')
               : L('暂时查不到版本信息。可以在终端执行（服务器上加 sudo）：', 'Version info is unavailable right now. You can run in a terminal (with sudo on a server):')),
             h('div', { style: { ...S.line, minHeight: 30, marginTop: 6 } }, h('code', { style: { ...S.mono, ...S.grow } }, cmd), h(CopyButton, { get: cmd }))))
       }
@@ -602,7 +602,7 @@ window.__ModuleLoader__.load({
         h('div', { style: S.h }, L('关于', 'About')),
         h('div', { style: { ...S.card, padding: '12px 14px' } },
           h('div', { style: S.line },
-            h('span', { style: { ...S.label, ...S.grow } }, `dsh-model ${info.version}`,
+            h('span', { style: { ...S.label, ...S.grow } }, `dsh-cpamc ${info.version}`,
               h('span', { style: { ...S.meta, marginLeft: 8 } }, info.latest ? (hasUpdate ? L(`有新版本 ${info.latest}`, `${info.latest} available`) : L('已是最新', 'Up to date')) : L('查不到最新版本', 'Latest version unknown'))),
             info.canManage && hasUpdate ? h('button', { type: 'button', style: S.btnPrimary, disabled: starting, onClick: () => void start('update') }, starting ? L('正在开始…', 'Starting…') : L(`更新到 ${info.latest}`, `Update to ${info.latest}`)) : null,
             info.canManage ? h('button', { type: 'button', style: { ...S.btn, color: C.err }, onClick: () => setConfirming(true) }, L('卸载', 'Uninstall')) : null),
@@ -611,7 +611,7 @@ window.__ModuleLoader__.load({
             [[L('更新', 'Update'), info.commands.update], [L('卸载', 'Uninstall'), info.commands.uninstall]].map(([t, c]) => h('div', { key: c, style: { ...S.line, minHeight: 30 } },
               h('span', { style: { ...S.meta, width: 40 } }, t), h('code', { style: { ...S.mono, ...S.grow } }, c), h(CopyButton, { get: c })))) : null,
           confirming ? h('div', { style: { marginTop: 10, padding: 10, border: `1px solid ${C.err}`, borderRadius: 8 } },
-            h('div', { style: { fontSize: 13, color: C.text, lineHeight: 1.7 } }, L('卸载会：关闭对外访问 → 移除这个管理页 → 把 dsh 里的模型配置还原 → 停止并删除引擎与守护进程 → 删除 ~/.dsh-model（含各家登录、OpenCode key、WorkBuddy 令牌副本）。', 'Uninstall will: turn off remote access → remove this page → restore dsh\'s model config → stop and delete the engine and daemon → delete ~/.dsh-model (including sign-ins, the OpenCode key and WorkBuddy token copies).')),
+            h('div', { style: { fontSize: 13, color: C.text, lineHeight: 1.7 } }, L('卸载会：关闭对外访问 → 移除这个管理页 → 把 dsh 里的模型配置还原 → 停止并删除引擎与守护进程 → 删除 ~/.dsh-cpamc（含各家登录、OpenCode key、WorkBuddy 令牌副本）。', 'Uninstall will: turn off remote access → remove this page → restore dsh\'s model config → stop and delete the engine and daemon → delete ~/.dsh-cpamc (including sign-ins, the OpenCode key and WorkBuddy token copies).')),
             h('label', { style: { ...S.line, fontSize: 13, marginTop: 6, cursor: 'pointer' } },
               h('input', { type: 'checkbox', checked: keepAuth, onChange: (e) => setKeepAuth(e.target.checked) }),
               L('先把各家登录凭据备份到主目录（以后重装可以拷回来）', 'Back up provider sign-ins to the home folder first (to reuse after reinstalling)')),
@@ -649,7 +649,7 @@ window.__ModuleLoader__.load({
           h('div', { style: S.h }, title),
           state.phase === 'done' ? h('p', { style: { ...S.note, color: C.text } }, upd
             ? L('完全退出 dsh 再打开一次，管理页的新代码才会生效。', 'Quit dsh completely and open it again so the management page loads the new code.')
-            : L('dsh 里的 dsh-model 模型已移除。完全退出 dsh 再打开，这一页就会消失。日志在主目录的 dsh-model-uninstall.log。', 'dsh-model\'s models are gone from dsh. Quit dsh completely and reopen it and this page disappears. The log is ~/dsh-model-uninstall.log.')) : null,
+            : L('dsh 里的 dsh-cpamc 模型已移除。完全退出 dsh 再打开，这一页就会消失。日志在主目录的 dsh-cpamc-uninstall.log。', 'dsh-cpamc\'s models are gone from dsh. Quit dsh completely and reopen it and this page disappears. The log is ~/dsh-cpamc-uninstall.log.')) : null,
           state.log ? h('pre', { style: { ...S.mono, ...S.card, padding: 10, maxHeight: 300, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 } }, state.log) : null,
           state.phase === 'done' && upd ? h('button', { type: 'button', style: { ...S.btn, marginTop: 10 }, onClick: onDone }, L('返回', 'Back')) : null))
     }
@@ -689,15 +689,15 @@ window.__ModuleLoader__.load({
         keyDialog ? h(KeyDialog, { onDone: () => { setKeyDialog(false); void load(true) }, onClose: () => setKeyDialog(false) }) : null)
     }
 
-    const name = 'dsh-model'
+    const name = 'dsh-cpamc'
     // 用到的服务必须先声明，否则 ctx.slots 读不到（实测：cannot get property "slots" without inject）
     const inject = ['slots']
     function apply(ctx) {
       try {
         ctx.slots.inject('settings.section', () =>
-          ctx.slots.register({ name: 'settings.section', id: 'dsh-model', order: 25, label: () => 'dsh-model' }, SettingsSection))
+          ctx.slots.register({ name: 'settings.section', id: 'dsh-cpamc', order: 25, label: () => 'dsh-cpamc' }, SettingsSection))
       } catch (error) {
-        console.warn('[dsh-model] 设置页注册失败', error)
+        console.warn('[dsh-cpamc] 设置页注册失败', error)
       }
     }
 

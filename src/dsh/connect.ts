@@ -1,8 +1,8 @@
-// dsh/connect.ts — 往 dsh 写入 / 还原 dsh-model 拥有的配置项
+// dsh/connect.ts — 往 dsh 写入 / 还原 dsh-cpamc 拥有的配置项
 //
-// dsh-model 在 dsh 里可能拥有几样东西（state.dsh 记账）：
-// - profiles/<p>/cordis.patch.yml 的 llm-pi-ai providers.<id>（dsh-model 自己的端点、内置的 opencode 路由）
-// - .credentials.yaml 的 refs.<NAME>（DSH_MODEL_API_KEY、OPENCODE_API_KEY）
+// dsh-cpamc 在 dsh 里可能拥有几样东西（state.dsh 记账）：
+// - profiles/<p>/cordis.patch.yml 的 llm-pi-ai providers.<id>（dsh-cpamc 自己的端点、内置的 opencode 路由）
+// - .credentials.yaml 的 refs.<NAME>（DSH_CPAMC_API_KEY、OPENCODE_API_KEY）
 // 首次写入前备份原件并记哈希；全部还原时：
 // - 文件自我们最后一次写入后没被动过 → 用备份逐字节还原（原本不存在就删掉）；
 // - 被改过 → 只摘掉我们拥有的那几项，保留别人的改动。
@@ -30,7 +30,7 @@ export interface ApplyOptions {
   profile: string | null
   force?: boolean
   dryRun?: boolean
-  /** 已存在、但不在台账里的 ref 是否其实是我们的（例如旧版本写的 DSH_MODEL_API_KEY） */
+  /** 已存在、但不在台账里的 ref 是否其实是我们的（例如旧版本写的 DSH_CPAMC_API_KEY） */
   isOwnRef?: (name: string, value: string) => boolean
 }
 
@@ -43,7 +43,7 @@ export interface ApplyResult {
 
 export function providerSpec(port: number, models: DshModel[]): ProviderSpec {
   return {
-    displayName: 'dsh-model',
+    displayName: 'dsh-cpamc',
     apiKeyEnv: KEY_REF,
     api: 'openai-completions',
     baseURL: `http://127.0.0.1:${port}/v1`,
@@ -66,7 +66,7 @@ async function checkLocation(state: State, location: DshLocation, force?: boolea
     throw new DshModelError(
       'dsh_connected_elsewhere',
       L(`已经接在另一个 dsh profile 上：${state.dsh.patchFile}`, `Already connected to another dsh profile: ${state.dsh.patchFile}`),
-      L('先执行 dsh-model disconnect-dsh', 'Run dsh-model disconnect-dsh first'),
+      L('先执行 dsh-cpamc disconnect-dsh', 'Run dsh-cpamc disconnect-dsh first'),
     )
   }
   if (location.version) {
@@ -115,8 +115,8 @@ export async function applyDsh(ctx: Ctx, state: State, items: DshItems, opts: Ap
     if (existing !== undefined && !ownedRefs.has(name) && !opts.isOwnRef?.(name, existing)) {
       throw new DshModelError(
         'credential_ref_conflict',
-        L(`dsh 凭据里已有 ${name}，且不是 dsh-model 写的`, `dsh credentials already contain ${name}, not written by dsh-model`),
-        L('不会覆盖它。要让 dsh-model 接管，请先在 dsh 设置里删掉它再重试', 'It will not be overwritten. To let dsh-model manage it, remove it in dsh settings and retry'),
+        L(`dsh 凭据里已有 ${name}，且不是 dsh-cpamc 写的`, `dsh credentials already contain ${name}, not written by dsh-cpamc`),
+        L('不会覆盖它。要让 dsh-cpamc 接管，请先在 dsh 设置里删掉它再重试', 'It will not be overwritten. To let dsh-cpamc manage it, remove it in dsh settings and retry'),
       )
     }
     credAfter = upsertRef(credAfter === '' ? null : credAfter, value, name)
@@ -136,7 +136,7 @@ export async function applyDsh(ctx: Ctx, state: State, items: DshItems, opts: Ap
     if (!ownedProviders.has(id) && readProvider(patchAfter === '' ? null : patchAfter, id)) {
       throw new DshModelError(
         'provider_conflict',
-        L(`dsh 里已有 provider ${id}，且不是 dsh-model 写的`, `dsh already has a provider ${id}, not written by dsh-model`),
+        L(`dsh 里已有 provider ${id}，且不是 dsh-cpamc 写的`, `dsh already has a provider ${id}, not written by dsh-cpamc`),
         L('不会覆盖它', 'It will not be overwritten'),
       )
     }
@@ -209,7 +209,7 @@ async function firstBackup(ctx: Ctx, location: DshLocation, patchBefore: string 
   }
 }
 
-// —— dsh-model 自己的端点 ——
+// —— dsh-cpamc 自己的端点 ——
 
 export interface ConnectInput {
   providerId: string
@@ -249,7 +249,7 @@ export interface DshGroup {
 }
 
 /**
- * 写入一组 provider（都指向统一端点、同一把 key）；以前写过、这次不再出现的 dsh-model* provider 一并移除。
+ * 写入一组 provider（都指向统一端点、同一把 key）；以前写过、这次不再出现的 dsh-cpamc* provider 一并移除。
  */
 export async function connectDshGroups(
   ctx: Ctx,
@@ -260,7 +260,7 @@ export async function connectDshGroups(
   const providers: Record<string, Record<string, unknown> | null> = {}
   const live = input.groups.filter((g) => g.models.length)
   for (const g of live) providers[g.providerId] = { ...providerSpec(input.port, g.models), displayName: g.displayName }
-  for (const id of state.dsh?.ownedProviders ?? []) if (id.startsWith('dsh-model') && !(id in providers)) providers[id] = null
+  for (const id of state.dsh?.ownedProviders ?? []) if (id.startsWith('dsh-cpamc') && !(id in providers)) providers[id] = null
   const r = await applyDsh(ctx, state, { refs: { [KEY_REF]: input.key }, providers }, {
     profile: input.profile,
     force: input.force,
@@ -270,11 +270,11 @@ export async function connectDshGroups(
   return { ...r, providers: live.map((g) => g.providerId) }
 }
 
-/** dsh 里有没有 dsh-model 写的任何 provider */
+/** dsh 里有没有 dsh-cpamc 写的任何 provider */
 export async function anyProviderPresent(state: State): Promise<boolean> {
   if (!state.dsh) return false
   const text = await readText(state.dsh.patchFile)
-  return (state.dsh.ownedProviders ?? []).filter((id) => id.startsWith('dsh-model')).some((id) => readProvider(text, id) != null)
+  return (state.dsh.ownedProviders ?? []).filter((id) => id.startsWith('dsh-cpamc')).some((id) => readProvider(text, id) != null)
 }
 
 // —— 全部还原 ——
@@ -352,5 +352,5 @@ export async function providerPresent(state: State, providerId: string): Promise
 }
 
 function redactCred(text: string): string {
-  return text.replace(/(dshm_)[A-Za-z0-9_-]{8,}([A-Za-z0-9_-]{4})/g, '$1…$2').replace(/(OPENCODE_API_KEY:\s*)\S+/g, '$1***')
+  return text.replace(/(dshc_)[A-Za-z0-9_-]{8,}([A-Za-z0-9_-]{4})/g, '$1…$2').replace(/(OPENCODE_API_KEY:\s*)\S+/g, '$1***')
 }

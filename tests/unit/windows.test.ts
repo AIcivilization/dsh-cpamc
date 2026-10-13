@@ -40,18 +40,18 @@ describe('windows: quoting for cmd.exe', () => {
 })
 
 describe('windows: hidden launcher script', () => {
-  const spec = { label: 'dsh-model-engine', file: 'C:\\Users\\张 三\\.dsh-model\\services\\dsh-model-engine.json', program: ['C:\\x\\cli-proxy-api.exe', '-config', 'C:\\x\\engine.yaml'], workingDirectory: 'C:\\x', stdoutPath: 'C:\\x\\engine.stdout.log', home: 'C:\\x' }
+  const spec = { label: 'dsh-cpamc-engine', file: 'C:\\Users\\张 三\\.dsh-cpamc\\services\\dsh-cpamc-engine.json', program: ['C:\\x\\cli-proxy-api.exe', '-config', 'C:\\x\\engine.yaml'], workingDirectory: 'C:\\x', stdoutPath: 'C:\\x\\engine.stdout.log', home: 'C:\\x' }
   it('runs the supervisor hidden (style 0) with every path quoted', () => {
     const vbs = renderVbs(spec, 'C:\\Program Files\\nodejs\\node.exe', false)
     expect(vbs).toContain('sh.Run """C:\\Program Files\\nodejs\\node.exe"" ')
-    expect(vbs).toContain('""service"" ""supervise"" ""C:\\Users\\张 三\\.dsh-model\\services\\dsh-model-engine.json""", 0, False')
+    expect(vbs).toContain('""service"" ""supervise"" ""C:\\Users\\张 三\\.dsh-cpamc\\services\\dsh-cpamc-engine.json""", 0, False')
     expect(vbs).not.toContain('ELECTRON_RUN_AS_NODE')
   })
   it('sets ELECTRON_RUN_AS_NODE when the node is the dsh desktop app', () => {
     expect(renderVbs(spec, 'C:\\Apps\\DeepSeek Harness.exe', true)).toContain('sh.Environment("Process")("ELECTRON_RUN_AS_NODE") = "1"')
   })
   it('writes the pid next to the spec', () => {
-    expect(renderSupervise(spec).pidFile).toBe('C:\\Users\\张 三\\.dsh-model\\services\\dsh-model-engine.pid')
+    expect(renderSupervise(spec).pidFile).toBe('C:\\Users\\张 三\\.dsh-cpamc\\services\\dsh-cpamc-engine.pid')
   })
 })
 

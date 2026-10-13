@@ -62,7 +62,7 @@ export async function login(ctx: Ctx, upstream: string, opts: LoginOptions): Pro
       throw new DshModelError(
         'already_logged_in',
         L(`${def.label} 已经登录（${existing.join(', ')}）`, `${def.label} is already logged in (${existing.join(', ')})`),
-        L(`换账号：dsh-model login ${def.id} --replace`, `To switch accounts: dsh-model login ${def.id} --replace`),
+        L(`换账号：dsh-cpamc login ${def.id} --replace`, `To switch accounts: dsh-cpamc login ${def.id} --replace`),
       )
     }
     if (existing.length) {
@@ -80,7 +80,7 @@ export async function login(ctx: Ctx, upstream: string, opts: LoginOptions): Pro
       info(L(`  1. 在你自己的电脑上另开终端执行：ssh -N -L ${def.callbackPort}:127.0.0.1:${def.callbackPort} ${sshTarget(ctx)}`, `  1. On your own computer, in another terminal: ssh -N -L ${def.callbackPort}:127.0.0.1:${def.callbackPort} ${sshTarget(ctx)}`))
       info(L('     然后在本地浏览器打开下面打印的授权链接。', '     then open the authorization URL printed below in your local browser.'))
       info(L('  2. 直接在本地浏览器打开授权链接，授权后把浏览器跳转到的地址（打不开也没关系）粘贴回这里。', '  2. Open the URL in your local browser; after approving, paste the address it redirects to (even if the page fails to load) back here.'))
-      if (def.deviceFlag) info(L(`  也可以改用 device-code：dsh-model login ${def.id} --device`, `  Or use device code instead: dsh-model login ${def.id} --device`))
+      if (def.deviceFlag) info(L(`  也可以改用 device-code：dsh-cpamc login ${def.id} --device`, `  Or use device code instead: dsh-cpamc login ${def.id} --device`))
       info('')
     }
 
@@ -96,10 +96,10 @@ export async function login(ctx: Ctx, upstream: string, opts: LoginOptions): Pro
       const hint =
         def.deviceFlag && flag !== def.deviceFlag
           ? L(
-              `没收到授权回调。网页报错或超时多半是网络 / 代理节点问题：换个节点重试，或改用 device-code：dsh-model login ${def.id} --device`,
-              `No authorization callback received. A web error or timeout is usually a network / proxy-node issue: retry on another node, or use device code: dsh-model login ${def.id} --device`,
+              `没收到授权回调。网页报错或超时多半是网络 / 代理节点问题：换个节点重试，或改用 device-code：dsh-cpamc login ${def.id} --device`,
+              `No authorization callback received. A web error or timeout is usually a network / proxy-node issue: retry on another node, or use device code: dsh-cpamc login ${def.id} --device`,
             )
-          : L('没收到授权结果，请重试；引擎日志：dsh-model logs', 'No authorization result; please retry. Engine log: dsh-model logs')
+          : L('没收到授权结果，请重试；引擎日志：dsh-cpamc logs', 'No authorization result; please retry. Engine log: dsh-cpamc logs')
       const message =
         code === 0
           ? L(`${def.label} 登录没有完成（超时或已取消）`, `${def.label} login did not complete (timed out or cancelled)`)

@@ -7,7 +7,7 @@ import { readProvider, removeProvider, upsertProvider } from '../../src/dsh/patc
 
 const fx = (name: string) => readFileSync(join(__dirname, '../fixtures/dsh', name), 'utf8')
 const spec = providerSpec(8317, [{ id: 'gpt-5', name: 'gpt-5' }])
-const ID = 'dsh-model'
+const ID = 'dsh-cpamc'
 
 describe('upsertProvider', () => {
   it('creates llm-pi-ai entry when missing and keeps other entries and comments', () => {
@@ -76,7 +76,7 @@ describe('removeProvider', () => {
 
   it('keeps an entry we created if the user added fields to it', () => {
     const added = upsertProvider(fx('no-llm.yml'), ID, spec).text
-    const edited = added.replace('      dsh-model:', '      mine:\n        api: openai-completions\n      dsh-model:')
+    const edited = added.replace('      dsh-cpamc:', '      mine:\n        api: openai-completions\n      dsh-cpamc:')
     const { text } = removeProvider(edited, ID, true)
     expect(YAML.parse(text).find((e: { id: string }) => e.id === 'llm-pi-ai').config.providers).toHaveProperty('mine')
   })

@@ -33,15 +33,15 @@ async function setup(patch: string | null, cred: string | null) {
 }
 
 describe('v0.2.0 → unified endpoint migration', () => {
-  it('moves the OpenCode key out of dsh into secrets.json and leaves only dsh-model in dsh', async () => {
+  it('moves the OpenCode key out of dsh into secrets.json and leaves only dsh-cpamc in dsh', async () => {
     const s = await setup(fx('no-llm.yml'), fx('credentials.yml'))
-    // v0.2.0 写过：内置 opencode 路由 + OPENCODE_API_KEY，外加 dsh-model 端点
+    // v0.2.0 写过：内置 opencode 路由 + OPENCODE_API_KEY，外加 dsh-cpamc 端点
     await applyDsh(s.ctx, s.state, { refs: { [OPENCODE_REF]: OC_KEY }, providers: { opencode: { displayName: 'OpenCode Zen', apiKeyEnv: OPENCODE_REF } } }, { profile: null })
-    await connectDsh(s.ctx, s.state, s.keys, { providerId: 'dsh-model', port: 8317, key: s.key, models: [{ id: 'x', name: 'x' }], profile: null })
+    await connectDsh(s.ctx, s.state, s.keys, { providerId: 'dsh-cpamc', port: 8317, key: s.key, models: [{ id: 'x', name: 'x' }], profile: null })
     expect(await migrateDshOpencode(s.ctx, s.all)).toBe(true)
     expect((await loadSecrets(s.ctx)).opencode?.key).toBe(OC_KEY)
     const providers = YAML.parse(await readFile(s.patchFile, 'utf8')).find((e: { id: string }) => e.id === 'llm-pi-ai').config.providers
-    expect(Object.keys(providers)).toEqual(['dsh-model'])
+    expect(Object.keys(providers)).toEqual(['dsh-cpamc'])
     expect(YAML.parse(await readFile(s.credFile, 'utf8')).refs[OPENCODE_REF]).toBeUndefined()
     await disconnectDsh(s.ctx, s.state)
     expect(await readFile(s.patchFile, 'utf8')).toBe(fx('no-llm.yml'))
@@ -57,8 +57,8 @@ describe('v0.2.0 → unified endpoint migration', () => {
     const { ctx } = await tempCtx()
     await saveState(ctx, { engine: { versions: [] }, dsh: { dshHome: '/x', profile: 'desktop', patchFile: '/x/p', credFile: '/x/c', patchBackup: null, credBackup: null, patchExisted: true, credExisted: true, createdLlmEntry: false, writtenPatchSha: null, writtenCredSha: null, connectedAt: '' } as unknown as State['dsh'] })
     const st = await loadState(ctx)
-    expect(st.dsh?.ownedProviders).toEqual(['dsh-model'])
-    expect(st.dsh?.ownedRefs).toEqual(['DSH_MODEL_API_KEY'])
+    expect(st.dsh?.ownedProviders).toEqual(['dsh-cpamc'])
+    expect(st.dsh?.ownedRefs).toEqual(['DSH_CPAMC_API_KEY'])
   })
 })
 

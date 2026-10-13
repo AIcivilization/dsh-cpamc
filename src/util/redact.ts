@@ -2,6 +2,6 @@
 
 export function redactKey(key: string): string {
   if (key.length <= 12) return '****'
-  const prefix = key.startsWith('dshm_') ? 'dshm_' : key.slice(0, 4)
+  const prefix = key.startsWith('dshc_') ? 'dshc_' : key.slice(0, 4)
   return `${prefix}…${key.slice(-4)}`
 }

@@ -8,7 +8,7 @@ const rec = (over: Record<string, unknown>) => ({ timestamp: new Date().toISOStr
 
 describe('stats', () => {
   it('aggregates by key, source and model with success rate, latency and tokens/s', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-model-stats-'))
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-cpamc-stats-'))
     const s = new Stats(join(dir, 'stats.json'))
     s.add(
       [

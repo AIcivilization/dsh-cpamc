@@ -1,6 +1,6 @@
 // Ported from dsh-workbuddy-connect v0.7.1 (commit 390582e04da4e8e8bf746d71997440e4b716ec47),
 // https://github.com/corrinehu/dsh-workbuddy-connect — MIT License, Copyright (c) 2026 Corrine Hu.
-// See LICENSE.dsh-workbuddy-connect in this directory. Changes: imports adapted to dsh-model (./_compat.js).
+// See LICENSE.dsh-workbuddy-connect in this directory. Changes: imports adapted to dsh-cpamc (./_compat.js).
 
 /**
  * The reasoning-effort probe: decide whether a model's `reasoning_effort`

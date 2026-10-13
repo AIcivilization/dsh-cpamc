@@ -27,9 +27,9 @@ describe('daemon core against a real engine', () => {
   const saved = { ...process.env }
 
   beforeAll(async () => {
-    process.env.DSH_MODEL_NO_APP_DISCOVERY = '1'
+    process.env.DSH_CPAMC_NO_APP_DISCOVERY = '1'
     const t = await tempCtx()
-    process.env.DSH_MODEL_HOME = t.ctx.paths.home
+    process.env.DSH_CPAMC_HOME = t.ctx.paths.home
     const manifest = await loadManifest()
     const asset = manifest.assets[platformTarget()]!
     const file = join(CACHE, asset.file)
@@ -37,7 +37,7 @@ describe('daemon core against a real engine', () => {
       await mkdir(CACHE, { recursive: true })
       await writeFile(file, Buffer.from(await (await fetch(asset.url)).arrayBuffer()))
     }
-    t.ctx.env.DSH_MODEL_ENGINE_ARCHIVE = file
+    t.ctx.env.DSH_CPAMC_ENGINE_ARCHIVE = file
     await installVersion(t.ctx, manifest.version, asset)
     await activateVersion(t.ctx, manifest.version)
 

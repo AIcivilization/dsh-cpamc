@@ -45,7 +45,7 @@ export async function loadLocalCatalog(home: string): Promise<LocalCatalog> {
 async function probe(s: LocalServer): Promise<LocalState> {
   const updatedAt = new Date().toISOString()
   // 测试环境不看本机真装了什么（与不发现桌面 App 同一个开关）
-  if (process.env.DSH_MODEL_NO_APP_DISCOVERY) return { reachable: false, models: [], updatedAt }
+  if (process.env.DSH_CPAMC_NO_APP_DISCOVERY) return { reachable: false, models: [], updatedAt }
   try {
     const r = await fetch(`${s.base}/models`, { signal: AbortSignal.timeout(1500) })
     if (!r.ok) return { reachable: false, models: [], updatedAt }

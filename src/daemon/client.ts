@@ -7,17 +7,17 @@ import { L, lang } from '../i18n.js'
 
 export async function control<T>(ctx: Ctx, method: string, path: string, body?: unknown, timeoutMs = 60_000): Promise<T> {
   const cfg = await loadBridgeConfig(ctx.paths.home)
-  if (!cfg) throw new DshModelError('daemon_not_configured', L('守护进程未配置（dsh-model setup）', 'Daemon not configured (dsh-model setup)'))
+  if (!cfg) throw new DshModelError('daemon_not_configured', L('守护进程未配置（dsh-cpamc setup）', 'Daemon not configured (dsh-cpamc setup)'))
   let res: Response
   try {
     res = await fetch(`http://127.0.0.1:${cfg.port}/control${path}`, {
       method,
-      headers: { Authorization: `Bearer ${cfg.secret}`, 'x-dsh-model-lang': lang(), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { Authorization: `Bearer ${cfg.secret}`, 'x-dsh-cpamc-lang': lang(), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(timeoutMs),
     })
   } catch {
-    throw new DshModelError('daemon_unreachable', L(`守护进程没在 127.0.0.1:${cfg.port} 上运行`, `Daemon is not running on 127.0.0.1:${cfg.port}`), L('执行 dsh-model repair', 'Run dsh-model repair'))
+    throw new DshModelError('daemon_unreachable', L(`守护进程没在 127.0.0.1:${cfg.port} 上运行`, `Daemon is not running on 127.0.0.1:${cfg.port}`), L('执行 dsh-cpamc repair', 'Run dsh-cpamc repair'))
   }
   const data = (await res.json().catch(() => ({}))) as { error?: { code: string; message: string; hint?: string } }
   if (!res.ok || data.error) {

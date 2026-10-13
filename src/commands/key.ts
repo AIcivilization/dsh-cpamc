@@ -14,7 +14,7 @@ import { redactKey } from '../util/redact.js'
 export async function key(ctx: Ctx, sub: string | undefined, name: string | undefined): Promise<number> {
   if (!sub || sub === 'list') return list(ctx)
   requireRootInVps(ctx)
-  if (!name) throw new DshModelError('missing_arg', L(`用法：dsh-model key ${sub} <名称>`, `Usage: dsh-model key ${sub} <name>`))
+  if (!name) throw new DshModelError('missing_arg', L(`用法：dsh-cpamc key ${sub} <名称>`, `Usage: dsh-cpamc key ${sub} <name>`))
   return withLock(ctx, async () => {
     const all = await loadAll(ctx)
     dshKey(all.keys) // 没 setup 过就报错
@@ -25,12 +25,12 @@ export async function key(ctx: Ctx, sub: string | undefined, name: string | unde
       if (isJsonMode()) printJson({ ok: true, name, key: entry.key, baseURL: `${baseUrl(all.config.port)}/v1` })
       ok(L(`已新增 key：${name}（只显示这一次，请妥善保存）`, `Key added: ${name} (shown only once; keep it safe)`))
       info(`\n  ${bold(entry.key)}\n`)
-      info(L(`  Base URL：${baseUrl(all.config.port)}/v1（远程访问见 dsh-model remote enable）`, `  Base URL: ${baseUrl(all.config.port)}/v1 (for remote access see dsh-model remote enable)`))
+      info(L(`  Base URL：${baseUrl(all.config.port)}/v1（远程访问见 dsh-cpamc remote enable）`, `  Base URL: ${baseUrl(all.config.port)}/v1 (for remote access see dsh-cpamc remote enable)`))
       return 0
     }
     if (sub === 'revoke') {
       if (name === DSH_KEY_NAME) {
-        throw new DshModelError('cannot_revoke_dsh', L('dsh 用的 key 不能吊销，只能轮换', 'The dsh key cannot be revoked, only rotated'), L('dsh-model key rotate dsh', 'dsh-model key rotate dsh'))
+        throw new DshModelError('cannot_revoke_dsh', L('dsh 用的 key 不能吊销，只能轮换', 'The dsh key cannot be revoked, only rotated'), L('dsh-cpamc key rotate dsh', 'dsh-cpamc key rotate dsh'))
       }
       revokeKey(all.keys, name)
       await saveKeys(ctx, all.keys)
@@ -66,7 +66,7 @@ async function list(ctx: Ctx): Promise<number> {
     return 0
   }
   if (!active.length) {
-    warn(L('还没有 key，先执行 dsh-model setup', 'No keys yet; run dsh-model setup first'))
+    warn(L('还没有 key，先执行 dsh-cpamc setup', 'No keys yet; run dsh-cpamc setup first'))
     return 0
   }
   info(table([[L('名称', 'Name'), 'Key', L('创建时间', 'Created')], ...active.map((k) => [k.name, redactKey(k.key), k.createdAt.slice(0, 19).replace('T', ' ')])]))

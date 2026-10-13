@@ -1,6 +1,6 @@
 // bridge/runtime.ts — bridge 的运行时：按本机装了哪些 WorkBuddy App 建 runtime，刷新目录并落盘
 //
-// 目录落在 $DSH_MODEL_HOME/workbuddy/catalog-<key>.json，CLI 据此生成引擎的 openai-compatibility 上游与 dsh 的模型清单。
+// 目录落在 $DSH_CPAMC_HOME/workbuddy/catalog-<key>.json，CLI 据此生成引擎的 openai-compatibility 上游与 dsh 的模型清单。
 // 刷新的令牌只存 bridge 自己的副本（移植代码的 WorkBuddyCredentialStore 负责），从不改写 App 的凭据文件。
 
 import { randomBytes } from 'node:crypto'
@@ -66,7 +66,7 @@ export async function ensureBridgeConfig(home: string, port: number, owner?: Own
 /** 本机装了哪几个 WorkBuddy App（看 Electron 可执行文件） */
 export async function installedVariants(): Promise<WorkBuddyVariant[]> {
   // 测试用：不去发现本机真实的 WorkBuddy App（免得读到真实凭据）
-  if (process.platform !== 'darwin' || process.env.DSH_MODEL_NO_APP_DISCOVERY === '1') return []
+  if (process.platform !== 'darwin' || process.env.DSH_CPAMC_NO_APP_DISCOVERY === '1') return []
   const out: WorkBuddyVariant[] = []
   for (const v of WORKBUDDY_VARIANTS) {
     const p = v.electron?.macOS?.defaultPath
@@ -77,7 +77,7 @@ export async function installedVariants(): Promise<WorkBuddyVariant[]> {
 }
 
 /**
- * bridge 要服务的产品：装了桌面 App 的（macOS），或用 dsh-model workbuddy login 登录过的（任何平台，含 VPS）。
+ * bridge 要服务的产品：装了桌面 App 的（macOS），或用 dsh-cpamc workbuddy login 登录过的（任何平台，含 VPS）。
  */
 export async function availableVariants(home: string): Promise<WorkBuddyVariant[]> {
   const apps = await installedVariants()
@@ -88,7 +88,7 @@ export async function availableVariants(home: string): Promise<WorkBuddyVariant[
   return out
 }
 
-/** 这个产品有没有 dsh-model 自己登录的那份令牌 */
+/** 这个产品有没有 dsh-cpamc 自己登录的那份令牌 */
 export async function hasOwnLogin(home: string, variant: WorkBuddyVariant): Promise<boolean> {
   return exists(join(bridgeDir(home), variant.ownFilename))
 }
@@ -119,7 +119,7 @@ export function buildRuntime(variant: WorkBuddyVariant, home: string): Runtime {
     keyProvider: atRestKeyProviderFor(variant),
     refresh: (credential) => client.refreshToken(credential),
     ownPath: join(bridgeDir(home), variant.ownFilename),
-    // 非 macOS 没有可解密的桌面凭据（CodeBuddy CLI 在 Linux 上也加密存储，密钥来源未知）：只用 dsh-model 自己登录的那份
+    // 非 macOS 没有可解密的桌面凭据（CodeBuddy CLI 在 Linux 上也加密存储，密钥来源未知）：只用 dsh-cpamc 自己登录的那份
     ...(process.platform === 'darwin' ? {} : { desktopPath: join(bridgeDir(home), '.no-desktop-credential') }),
   })
   const catalog = new WorkBuddyCatalog(variant.id === 'workbuddy-ai' ? FALLBACK_WORKBUDDY_AI_MODELS : FALLBACK_WORKBUDDY_MODELS)

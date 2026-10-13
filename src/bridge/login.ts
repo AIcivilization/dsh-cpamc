@@ -1,11 +1,11 @@
-// bridge/login.ts — dsh-model 自己完成 WorkBuddy 登录（不需要桌面 App，也不需要 CodeBuddy CLI）
+// bridge/login.ts — dsh-cpamc 自己完成 WorkBuddy 登录（不需要桌面 App，也不需要 CodeBuddy CLI）
 //
 // 流程与 WorkBuddy 内置 CLI 的 cli-external-link 相同（读其 product.json 与登录源码确认，2026-10-08）：
 //   POST {base}/v2/plugin/auth/state?platform=<workbuddy|workbuddy-ai>  → { state, authUrl }
 //   用户在任意设备的浏览器打开 authUrl 并授权（服务器上不需要浏览器，也没有本地回调）
 //   轮询 GET {base}/v2/plugin/auth/token?state=…                         → 令牌
 //   GET {base}/v2/plugin/login/account?state=…（Bearer）                 → 账号（uid / 企业 / 昵称）
-// 令牌按移植凭据库的"自有副本"格式写进 $DSH_MODEL_HOME/workbuddy/<ownFilename>（0600），bridge 直接用。
+// 令牌按移植凭据库的"自有副本"格式写进 $DSH_CPAMC_HOME/workbuddy/<ownFilename>（0600），bridge 直接用。
 // 网络请求走 curl：它认 -x 代理（Node 的 fetch 不走代理）；国内版域名强制直连。
 
 import { join } from 'node:path'
@@ -39,7 +39,7 @@ async function curlJson(method: 'GET' | 'POST', url: string, headers: string[], 
   const args = ['-s', '-m', '20', '-w', '\n%{http_code}', '-X', method, '-K', '-', ...(proxy && !direct ? ['-x', proxy] : ['--noproxy', '*']), ...(method === 'POST' ? ['-d', '{}'] : []), url]
   const r = await run('curl', args, { input: cfg, timeoutMs: 30_000 })
   if (r.code !== 0 && !r.stdout) {
-    throw new DshModelError('workbuddy_network', L(`连不上 ${new URL(url).host}（curl 退出码 ${r.code}）${proxy ? '' : '；海外 / 国际版可能需要代理：dsh-model setup --proxy <地址>'}`, `Cannot reach ${new URL(url).host} (curl exit ${r.code})${proxy ? '' : '; the international site may need a proxy: dsh-model setup --proxy <url>'}`))
+    throw new DshModelError('workbuddy_network', L(`连不上 ${new URL(url).host}（curl 退出码 ${r.code}）${proxy ? '' : '；海外 / 国际版可能需要代理：dsh-cpamc setup --proxy <地址>'}`, `Cannot reach ${new URL(url).host} (curl exit ${r.code})${proxy ? '' : '; the international site may need a proxy: dsh-cpamc setup --proxy <url>'}`))
   }
   const lines = r.stdout.trimEnd().split('\n')
   const status = Number(lines.pop()) || 0
@@ -69,8 +69,8 @@ export interface LoginOptions {
 export async function workbuddyLogin(variant: WorkBuddyVariant, home: string, opts: LoginOptions): Promise<WorkBuddyCredential> {
   const known = LOGIN_ENDPOINTS[variant.id]
   if (!known) throw new DshModelError('workbuddy_unknown_variant', `unknown WorkBuddy product: ${variant.id}`)
-  // 测试用：DSH_MODEL_WORKBUDDY_BASE 指向本机假服务
-  const ep = process.env.DSH_MODEL_WORKBUDDY_BASE ? { ...known, base: process.env.DSH_MODEL_WORKBUDDY_BASE } : known
+  // 测试用：DSH_CPAMC_WORKBUDDY_BASE 指向本机假服务
+  const ep = process.env.DSH_CPAMC_WORKBUDDY_BASE ? { ...known, base: process.env.DSH_CPAMC_WORKBUDDY_BASE } : known
 
   const st = await curlJson('POST', `${ep.base}/v2/plugin/auth/state?platform=${ep.platform}`, NO_AUTH_HEADERS, opts.proxy)
   const state = str(st.body.data?.state)
@@ -97,7 +97,7 @@ export async function workbuddyLogin(variant: WorkBuddyVariant, home: string, op
       break
     }
   }
-  if (!token) throw new DshModelError('workbuddy_login_timeout', L('等待授权超时（10 分钟）', 'Timed out waiting for authorization (10 minutes)'), L('重新执行 dsh-model workbuddy login', 'Run dsh-model workbuddy login again'))
+  if (!token) throw new DshModelError('workbuddy_login_timeout', L('等待授权超时（10 分钟）', 'Timed out waiting for authorization (10 minutes)'), L('重新执行 dsh-cpamc workbuddy login', 'Run dsh-cpamc workbuddy login again'))
 
   const accessToken = str(token.accessToken)!
   // 账号信息：uid / 企业 / 昵称决定请求头（X-User-Id 等），拿不到就用 X-No-* 头
@@ -138,7 +138,7 @@ export async function workbuddyLogin(variant: WorkBuddyVariant, home: string, op
   return credential
 }
 
-/** 退出登录：删掉 dsh-model 保存的那份（App 的文件不动） */
+/** 退出登录：删掉 dsh-cpamc 保存的那份（App 的文件不动） */
 export async function workbuddyLogout(variant: WorkBuddyVariant, home: string): Promise<boolean> {
   const { rm } = await import('node:fs/promises')
   const { exists } = await import('../util/fs.js')

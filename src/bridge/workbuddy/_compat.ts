@@ -1,4 +1,4 @@
-// _compat.ts — 移植代码原本依赖 dsh 的 @deepseek-ai/dsh-atomic-write 与 @deepseek-ai/dsh-home-paths，这里给出 dsh-model 的等价实现。
+// _compat.ts — 移植代码原本依赖 dsh 的 @deepseek-ai/dsh-atomic-write 与 @deepseek-ai/dsh-home-paths，这里给出 dsh-cpamc 的等价实现。
 // resolveDshHome() 在移植代码里只用来放自己的状态文件（凭据副本、版本缓存），所以指向 bridge 的状态目录，而不是 dsh 的 DSH_HOME。
 
 import { open, rm } from 'node:fs/promises'
@@ -6,9 +6,9 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { atomicWrite, ensureDir } from '../../util/fs.js'
 
-/** bridge 的状态目录：$DSH_MODEL_HOME/workbuddy（默认 ~/.dsh-model/workbuddy） */
+/** bridge 的状态目录：$DSH_CPAMC_HOME/workbuddy（默认 ~/.dsh-cpamc/workbuddy） */
 export function resolveDshHome(): string {
-  const home = process.env.DSH_MODEL_HOME ? resolve(process.env.DSH_MODEL_HOME) : join(homedir(), '.dsh-model')
+  const home = process.env.DSH_CPAMC_HOME ? resolve(process.env.DSH_CPAMC_HOME) : join(homedir(), '.dsh-cpamc')
   return join(home, 'workbuddy')
 }
 

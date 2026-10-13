@@ -1,9 +1,9 @@
-// plugin/index.js — dsh-model 的 dsh 插件（宿主端）
+// plugin/index.js — dsh-cpamc 的 dsh 插件（宿主端）
 //
-// 只做一件事：把页面的请求转给 dsh-model 守护进程的 /control/*（设计 §14.1）。
-// - 路由 /api-dsh-model/call 与 /api-dsh-model/token，挂在 dsh 自己的 webServer 上，所以先过 dsh 的登录校验；
+// 只做一件事：把页面的请求转给 dsh-cpamc 守护进程的 /control/*（设计 §14.1）。
+// - 路由 /api-dsh-cpamc/call 与 /api-dsh-cpamc/token，挂在 dsh 自己的 webServer 上，所以先过 dsh 的登录校验；
 // - 只收同源的 POST JSON，并且要带页面令牌（宿主经 index-inject / tapIndex 注入页面，跨站网页读不到）；
-// - 守护进程的地址与控制密钥从 ~/.dsh-model/bridge.json 读（dsh 与守护进程是同一个用户），浏览器永远拿不到；
+// - 守护进程的地址与控制密钥从 ~/.dsh-cpamc/bridge.json 读（dsh 与守护进程是同一个用户），浏览器永远拿不到；
 // - 只转发白名单里的控制接口。
 // 写法照 dsh-vps-manager（同作者）的 routes.js。
 
@@ -14,14 +14,14 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-/** 本包根目录：插件就是完整的 dsh-model 包，自带命令行 */
+/** 本包根目录：插件就是完整的 dsh-cpamc 包，自带命令行 */
 const PKG_ROOT = fileURLToPath(new URL('..', import.meta.url))
 const VPS_ROOT = '/opt/dsh-vps'
 
-export const name = 'dsh-model'
+export const name = 'dsh-cpamc'
 export const inject = []
 
-const TOKEN_HEADER = 'x-dsh-model-token'
+const TOKEN_HEADER = 'x-dsh-cpamc-token'
 
 /** 允许页面调用的守护进程接口：[方法, 路径正则] */
 const ALLOWED = [
@@ -47,7 +47,7 @@ const ALLOWED = [
 ]
 
 function home() {
-  return process.env.DSH_MODEL_HOME || join(homedir(), '.dsh-model')
+  return process.env.DSH_CPAMC_HOME || join(homedir(), '.dsh-cpamc')
 }
 
 async function daemonConfig() {
@@ -103,7 +103,7 @@ function runCli(args) {
   if (running) return running
   running = new Promise((resolve) => {
     let out = ''
-    const child = spawn(process.execPath, [join(PKG_ROOT, 'bin/dsh-model.js'), ...args], {
+    const child = spawn(process.execPath, [join(PKG_ROOT, 'bin/dsh-cpamc.js'), ...args], {
       windowsHide: true,
       // dsh 桌面版可能跑在 Electron 里：让它当普通 Node 用
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NO_COLOR: '1', FORCE_COLOR: '0' },
@@ -130,7 +130,7 @@ export function apply(ctx) {
     track(
       ws.register({
         kind: 'exact',
-        path: '/api-dsh-model/call',
+        path: '/api-dsh-cpamc/call',
         handler: async (req, res) => {
           const bad = check(req, token)
           if (bad) return json(res, bad.code, { error: { code: 'refused', message: bad.error } })
@@ -149,12 +149,12 @@ export function apply(ctx) {
           try {
             cfg = await daemonConfig()
           } catch {
-            return json(res, 503, { error: { code: 'daemon_not_configured', message: 'dsh-model daemon not configured (run dsh-model setup)' } })
+            return json(res, 503, { error: { code: 'daemon_not_configured', message: 'dsh-cpamc daemon not configured (run dsh-cpamc setup)' } })
           }
           try {
             const r = await fetch(`http://127.0.0.1:${cfg.port}/control${path}`, {
               method,
-              headers: { Authorization: `Bearer ${cfg.secret}`, 'x-dsh-model-lang': call.lang === 'en' ? 'en' : 'zh', ...(call.body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+              headers: { Authorization: `Bearer ${cfg.secret}`, 'x-dsh-cpamc-lang': call.lang === 'en' ? 'en' : 'zh', ...(call.body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
               body: call.body !== undefined && method !== 'GET' ? JSON.stringify(call.body) : undefined,
               signal: AbortSignal.timeout(90_000),
             })
@@ -162,7 +162,7 @@ export function apply(ctx) {
             res.writeHead(r.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
             res.end(text || '{}')
           } catch {
-            return json(res, 503, { error: { code: 'daemon_unreachable', message: 'dsh-model daemon is not running (run dsh-model repair)' } })
+            return json(res, 503, { error: { code: 'daemon_unreachable', message: 'dsh-cpamc daemon is not running (run dsh-cpamc repair)' } })
           }
         },
       }),
@@ -172,7 +172,7 @@ export function apply(ctx) {
     track(
       ws.register({
         kind: 'exact',
-        path: '/api-dsh-model/setup',
+        path: '/api-dsh-cpamc/setup',
         handler: async (req, res) => {
           const bad = check(req, token)
           if (bad) return json(res, bad.code, { error: { code: 'refused', message: bad.error } })
@@ -195,7 +195,7 @@ export function apply(ctx) {
     track(
       ws.register({
         kind: 'exact',
-        path: '/api-dsh-model/token',
+        path: '/api-dsh-cpamc/token',
         handler: (req, res) => {
           const bad = check(req, token, false)
           if (bad) return json(res, bad.code, { error: { code: 'refused', message: bad.error } })
@@ -206,11 +206,11 @@ export function apply(ctx) {
 
     if (typeof webCtx.on === 'function') {
       track(webCtx.on('webserver/index-inject', (table) => {
-        if (Array.isArray(table)) table.push({ kind: 'global', name: '__DSH_MODEL_TOKEN__', value: token })
+        if (Array.isArray(table)) table.push({ kind: 'global', name: '__DSH_CPAMC_TOKEN__', value: token })
       }))
     }
     if (typeof ws.tapIndex === 'function') {
-      track(ws.tapIndex((html) => html.replace('</head>', `<script>window.__DSH_MODEL_TOKEN__=${JSON.stringify(token)}</script></head>`)))
+      track(ws.tapIndex((html) => html.replace('</head>', `<script>window.__DSH_CPAMC_TOKEN__=${JSON.stringify(token)}</script></head>`)))
     }
 
     try {
@@ -222,7 +222,7 @@ export function apply(ctx) {
             // 反注册失败不影响卸载
           }
         }
-      }, 'dsh-model: routes')
+      }, 'dsh-cpamc: routes')
     } catch {
       // 宿主不支持就算了
     }

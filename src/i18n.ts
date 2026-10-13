@@ -1,7 +1,7 @@
 // i18n.ts — 中英双语输出
 //
 // 写法：L('中文', 'English')，两种文字挨着写，改一处时另一处就在眼前（与 dsh-vps 一致）。
-// 语言优先级：--lang > DSH_MODEL_LANG > LC_ALL / LC_MESSAGES / LANG > Intl > zh
+// 语言优先级：--lang > DSH_CPAMC_LANG > LC_ALL / LC_MESSAGES / LANG > Intl > zh
 
 export type Lang = 'zh' | 'en'
 
@@ -18,7 +18,7 @@ export function normalizeLang(value: unknown): Lang | '' {
 export function systemLang(env: NodeJS.ProcessEnv = process.env): Lang {
   const fromEnv = env.LC_ALL || env.LC_MESSAGES || env.LANG || ''
   if (fromEnv && !/^(C|POSIX)(\.|$)/i.test(fromEnv)) return normalizeLang(fromEnv) || 'zh'
-  // 服务器上常见 LANG=C / C.UTF-8 或干脆没设：本项目以中文为主，这时默认中文（英文用 --lang en 或 DSH_MODEL_LANG=en）
+  // 服务器上常见 LANG=C / C.UTF-8 或干脆没设：本项目以中文为主，这时默认中文（英文用 --lang en 或 DSH_CPAMC_LANG=en）
   if (fromEnv || process.platform !== 'darwin') return 'zh'
   try {
     return normalizeLang(Intl.DateTimeFormat().resolvedOptions().locale) || 'zh'
@@ -29,7 +29,7 @@ export function systemLang(env: NodeJS.ProcessEnv = process.env): Lang {
 
 /** 在命令行解析完后调用一次；flag 为 --lang 的值 */
 export function initLang(flag?: string, env: NodeJS.ProcessEnv = process.env): Lang {
-  current = normalizeLang(flag) || normalizeLang(env.DSH_MODEL_LANG) || systemLang(env)
+  current = normalizeLang(flag) || normalizeLang(env.DSH_CPAMC_LANG) || systemLang(env)
   return current
 }
 

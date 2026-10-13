@@ -47,7 +47,7 @@ export async function resolveProfile(ctx: Ctx, preferred: string | null): Promis
 }
 
 export async function dshVersion(ctx: Ctx): Promise<string | null> {
-  if (ctx.env.DSH_MODEL_DSH_VERSION) return ctx.env.DSH_MODEL_DSH_VERSION
+  if (ctx.env.DSH_CPAMC_DSH_VERSION) return ctx.env.DSH_CPAMC_DSH_VERSION
   if (ctx.mode === 'vps') {
     try {
       const pkg = JSON.parse(await readFile(join(VPS_ROOT, 'dsh/current/node_modules/@deepseek-ai/dsh/package.json'), 'utf8')) as { version?: string }

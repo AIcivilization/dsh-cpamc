@@ -43,7 +43,7 @@ export function getUpstream(id: string): UpstreamDef {
 
 export function riskNotice(def: UpstreamDef): string {
   return L(
-    `${def.label} 的服务条款限定订阅凭据只能在其官方客户端中使用。通过第三方工具调用可能违反条款，账号存在被限制或封禁的风险。dsh-model 仅供个人自用，风险由你自行承担。\n确认后请加 --accept-risk 重新执行：dsh-model login ${def.id} --accept-risk`,
-    `${def.label}'s terms limit subscription credentials to its official clients. Using them through a third-party tool may violate those terms and risks account restriction or suspension. dsh-model is for personal use only; you accept this risk yourself.\nTo proceed, re-run with --accept-risk: dsh-model login ${def.id} --accept-risk`,
+    `${def.label} 的服务条款限定订阅凭据只能在其官方客户端中使用。通过第三方工具调用可能违反条款，账号存在被限制或封禁的风险。dsh-cpamc 仅供个人自用，风险由你自行承担。\n确认后请加 --accept-risk 重新执行：dsh-cpamc login ${def.id} --accept-risk`,
+    `${def.label}'s terms limit subscription credentials to its official clients. Using them through a third-party tool may violate those terms and risks account restriction or suspension. dsh-cpamc is for personal use only; you accept this risk yourself.\nTo proceed, re-run with --accept-risk: dsh-cpamc login ${def.id} --accept-risk`,
   )
 }

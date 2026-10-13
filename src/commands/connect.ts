@@ -47,7 +47,7 @@ export async function disconnect(ctx: Ctx): Promise<number> {
       how === 'restored'
         ? ok(L(`${what}：已逐字节还原`, `${what}: restored byte-for-byte`))
         : how === 'surgical'
-          ? ok(L(`${what}：期间被修改过，只移除了 dsh-model 写入的部分`, `${what}: modified meanwhile; removed only dsh-model's part`))
+          ? ok(L(`${what}：期间被修改过，只移除了 dsh-cpamc 写入的部分`, `${what}: modified meanwhile; removed only dsh-cpamc's part`))
           : skip(L(`${what}：无需改动`, `${what}: nothing to change`))
     say('cordis.patch.yml', r.patch)
     say('.credentials.yaml', r.cred)

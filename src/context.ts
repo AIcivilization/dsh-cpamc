@@ -1,9 +1,9 @@
 // context.ts — 运行模式与所有路径
 //
-// local：普通用户在 Mac / Linux 上自用，状态在 ~/.dsh-model，服务是用户级的
-// vps  ：检测到 dsh-vps（/opt/dsh-vps），需要 root；引擎以 dsh 用户运行，状态在 /home/dsh/.dsh-model
+// local：普通用户在 Mac / Linux 上自用，状态在 ~/.dsh-cpamc，服务是用户级的
+// vps  ：检测到 dsh-vps（/opt/dsh-vps），需要 root；引擎以 dsh 用户运行，状态在 /home/dsh/.dsh-cpamc
 //
-// 测试与特殊场景可用环境变量覆盖：DSH_MODEL_MODE、DSH_MODEL_HOME、DSH_HOME、DSH_MODEL_SERVICE=none
+// 测试与特殊场景可用环境变量覆盖：DSH_CPAMC_MODE、DSH_CPAMC_HOME、DSH_HOME、DSH_CPAMC_SERVICE=none
 
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -40,20 +40,20 @@ export interface Ctx {
   mode: Mode
   platform: 'darwin' | 'linux' | 'win32'
   paths: Paths
-  /** vps 模式：dsh-model 写出的文件归这个用户 */
+  /** vps 模式：dsh-cpamc 写出的文件归这个用户 */
   owner?: Owner
   /** vps 模式：引擎以这个用户运行（login 时 sudo -u） */
   runAs?: string
   /** dsh 的 DSH_HOME */
   dshHome: string
   isRoot: boolean
-  /** DSH_MODEL_SERVICE=none 时跳过系统服务（测试用，引擎由调用方自己起） */
+  /** DSH_CPAMC_SERVICE=none 时跳过系统服务（测试用，引擎由调用方自己起） */
   serviceDisabled: boolean
   env: NodeJS.ProcessEnv
 }
 
 export function detectMode(env: NodeJS.ProcessEnv = process.env, platform = process.platform): Mode {
-  const forced = env.DSH_MODEL_MODE
+  const forced = env.DSH_CPAMC_MODE
   if (forced === 'local' || forced === 'vps') return forced
   return platform === 'linux' && existsSync(VPS_ROOT) ? 'vps' : 'local'
 }
@@ -86,10 +86,10 @@ export async function createContext(env: NodeJS.ProcessEnv = process.env): Promi
   }
   const mode = detectMode(env, platform)
   const isRoot = typeof process.getuid === 'function' && process.getuid() === 0
-  const serviceDisabled = env.DSH_MODEL_SERVICE === 'none'
+  const serviceDisabled = env.DSH_CPAMC_SERVICE === 'none'
 
   if (mode === 'vps') {
-    const home = env.DSH_MODEL_HOME ? resolve(env.DSH_MODEL_HOME) : join(VPS_USER_HOME, '.dsh-model')
+    const home = env.DSH_CPAMC_HOME ? resolve(env.DSH_CPAMC_HOME) : join(VPS_USER_HOME, '.dsh-cpamc')
     return {
       mode,
       platform,
@@ -103,7 +103,7 @@ export async function createContext(env: NodeJS.ProcessEnv = process.env): Promi
     }
   }
 
-  const home = env.DSH_MODEL_HOME ? resolve(env.DSH_MODEL_HOME) : join(homedir(), '.dsh-model')
+  const home = env.DSH_CPAMC_HOME ? resolve(env.DSH_CPAMC_HOME) : join(homedir(), '.dsh-cpamc')
   return {
     mode,
     platform,
@@ -121,7 +121,7 @@ export function requireRootInVps(ctx: Ctx): void {
     throw new DshModelError(
       'need_root',
       L('检测到 dsh-vps，这台机器按 VPS 模式运行，需要 root。', 'dsh-vps detected: running in VPS mode, which needs root.'),
-      L('请用 sudo 重新执行，例如：sudo dsh-model setup', 'Re-run with sudo, e.g. sudo dsh-model setup'),
+      L('请用 sudo 重新执行，例如：sudo dsh-cpamc setup', 'Re-run with sudo, e.g. sudo dsh-cpamc setup'),
     )
   }
 }

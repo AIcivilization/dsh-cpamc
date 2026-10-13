@@ -1,8 +1,8 @@
-// integrations/dshplugin.ts — 把 dsh-model 自己装进 dsh 当插件（设置 → dsh-model 页面，设计 §14.5）
+// integrations/dshplugin.ts — 把 dsh-cpamc 自己装进 dsh 当插件（设置 → dsh-cpamc 页面，设计 §14.5）
 //
-// 用 dsh 自己的插件管理：dsh plugin --profile <p> add dsh-model@<本版本>，和插件市场装的是同一个 npm 包。
+// 用 dsh 自己的插件管理：dsh plugin --profile <p> add dsh-cpamc@<本版本>，和插件市场装的是同一个 npm 包。
 // 早先用 link: 指到 npm 全局目录：VPS 上那个目录归 root，之后从插件市场装就会 EACCES（实测），所以改掉。
-// 用户自己从市场 / GitHub 装的（依赖写法不是我们的）就不动它。卸载时只移除 dsh-model 装的那份。
+// 用户自己从市场 / GitHub 装的（依赖写法不是我们的）就不动它。卸载时只移除 dsh-cpamc 装的那份。
 
 import { lstat, realpath, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -15,7 +15,7 @@ import type { All } from '../ops.js'
 import { pkgVersion } from '../util/pkg.js'
 import { ok, skip } from '../util/output.js'
 
-export const PLUGIN_NAME = 'dsh-model'
+export const PLUGIN_NAME = 'dsh-cpamc'
 
 /** 插件在 profile 里的实际目录（pnpm 的真实路径） */
 export async function pluginRoot(ctx: Ctx, profile: string | null): Promise<string | null> {
@@ -26,7 +26,7 @@ export async function pluginRoot(ctx: Ctx, profile: string | null): Promise<stri
   }
 }
 const NPM_PACKAGE_URL = `https://registry.npmjs.org/${PLUGIN_NAME}`
-const GITHUB_SPEC = 'https://github.com/AIcivilization/dsh-model/archive/refs/heads/main.tar.gz'
+const GITHUB_SPEC = 'https://github.com/AIcivilization/dsh-cpamc/archive/refs/heads/main.tar.gz'
 
 /** 我们自己写进 profile 的依赖：link:（旧版）、精确版本号、GitHub 主干包 */
 function isOurSpec(spec: string): boolean {
@@ -71,10 +71,10 @@ export async function installDshPlugin(ctx: Ctx, all: All, opts: { version?: str
   const code = await dshPlugin(ctx, profile, ['add', want.install, '--config.strict-dep-builds=false'], all.config.proxy)
   const installed = await profileHasDependency(ctx, profile, PLUGIN_NAME)
   if (code !== 0 || !installed) {
-    throw new DshModelError('plugin_install_failed', L(`把 dsh-model 装进 dsh 失败（退出码 ${code}）`, `Failed to install dsh-model into dsh (exit code ${code})`), L('可以在 dsh 的插件市场搜索 dsh-model 安装', 'You can install it from the dsh plugin marketplace (search dsh-model)'))
+    throw new DshModelError('plugin_install_failed', L(`把 dsh-cpamc 装进 dsh 失败（退出码 ${code}）`, `Failed to install dsh-cpamc into dsh (exit code ${code})`), L('可以在 dsh 的插件市场搜索 dsh-cpamc 安装', 'You can install it from the dsh plugin marketplace (search dsh-cpamc)'))
   }
   all.state.plugins = [...(all.state.plugins ?? []).filter((p) => p.name !== PLUGIN_NAME), { name: PLUGIN_NAME, version: installed, installedByUs: true, installedAt: new Date().toISOString() }]
-  ok(L(`dsh 插件已安装（${installed}）：重启一次 dsh，在「设置 → dsh-model」里管理来源、用量和 key`, `dsh plugin installed (${installed}): restart dsh once, then manage sources, usage and keys in Settings → dsh-model`))
+  ok(L(`dsh 插件已安装（${installed}）：重启一次 dsh，在「设置 → dsh-cpamc」里管理来源、用量和 key`, `dsh plugin installed (${installed}): restart dsh once, then manage sources, usage and keys in Settings → dsh-cpamc`))
 }
 
 /** 只移除我们装的那份；force（管理页点「卸载」）时用户自己从市场装的也移除 */
@@ -84,7 +84,7 @@ export async function removeDshPlugin(ctx: Ctx, all: All, opts: { force?: boolea
   const profile = await resolveProfile(ctx, all.config.dsh.profile)
   if (await profileHasDependency(ctx, profile, PLUGIN_NAME)) {
     const code = await dshPlugin(ctx, profile, ['remove', PLUGIN_NAME], all.config.proxy)
-    if (code !== 0) throw new DshModelError('plugin_remove_failed', L(`从 dsh 移除 dsh-model 插件失败（退出码 ${code}）`, `Failed to remove the dsh-model plugin from dsh (exit code ${code})`))
+    if (code !== 0) throw new DshModelError('plugin_remove_failed', L(`从 dsh 移除 dsh-cpamc 插件失败（退出码 ${code}）`, `Failed to remove the dsh-cpamc plugin from dsh (exit code ${code})`))
   }
   all.state.plugins = (all.state.plugins ?? []).filter((p) => p.name !== PLUGIN_NAME)
   return true

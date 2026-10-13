@@ -80,7 +80,7 @@ export async function fetchUpstreamAsset(manifest: Manifest, version: string, ta
 
 /**
  * 安装某版本到 versions/<v>/（已装就跳过）。返回是否真的装了。
- * DSH_MODEL_ENGINE_ARCHIVE 可指向本地 tar.gz（离线 / 测试），同样要过 sha256 校验。
+ * DSH_CPAMC_ENGINE_ARCHIVE 可指向本地 tar.gz（离线 / 测试），同样要过 sha256 校验。
  */
 export async function installVersion(ctx: Ctx, version: string, asset: ManifestAsset): Promise<boolean> {
   const bin = versionBinary(ctx, version)
@@ -91,7 +91,7 @@ export async function installVersion(ctx: Ctx, version: string, asset: ManifestA
   const archive = join(ctx.paths.tmp, asset.file)
   const partial = join(ctx.paths.versionsDir, `${version}.partial`)
   try {
-    const local = ctx.env.DSH_MODEL_ENGINE_ARCHIVE
+    const local = ctx.env.DSH_CPAMC_ENGINE_ARCHIVE
     let data: Buffer
     if (local) {
       data = await readFile(local)

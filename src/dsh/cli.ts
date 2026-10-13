@@ -52,7 +52,7 @@ async function windowsDshCli(ctx: Ctx): Promise<DshCli | null> {
 }
 
 export async function locateDshCli(ctx: Ctx): Promise<DshCli> {
-  if (ctx.env.DSH_MODEL_DSH_BIN) return { cmd: ctx.env.DSH_MODEL_DSH_BIN, pre: [] }
+  if (ctx.env.DSH_CPAMC_DSH_BIN) return { cmd: ctx.env.DSH_CPAMC_DSH_BIN, pre: [] }
   if (ctx.mode === 'vps') {
     try {
       const env = await readFile(join(VPS_ROOT, 'state/gate.env'), 'utf8')
@@ -74,7 +74,7 @@ export async function locateDshCli(ctx: Ctx): Promise<DshCli> {
   }
   const onPath = await which('dsh')
   if (onPath) return { cmd: onPath, pre: [] }
-  throw new DshModelError('dsh_cli_not_found', L('找不到 dsh 的命令行', 'Could not find the dsh command line'), L('请确认 dsh 已安装；或设置 DSH_MODEL_DSH_BIN 指向 dsh 可执行文件', 'Make sure dsh is installed, or set DSH_MODEL_DSH_BIN to the dsh executable'))
+  throw new DshModelError('dsh_cli_not_found', L('找不到 dsh 的命令行', 'Could not find the dsh command line'), L('请确认 dsh 已安装；或设置 DSH_CPAMC_DSH_BIN 指向 dsh 可执行文件', 'Make sure dsh is installed, or set DSH_CPAMC_DSH_BIN to the dsh executable'))
 }
 
 function dshEnv(ctx: Ctx, proxy: string | null | undefined): NodeJS.ProcessEnv {

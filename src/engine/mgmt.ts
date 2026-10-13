@@ -1,6 +1,6 @@
 // engine/mgmt.ts — 引擎管理接口（v8）的客户端
 //
-// 管理接口只监听本机，用随机强密钥（mgmt.json，0600），只有 dsh-model 自己（CLI 与守护进程）使用；
+// 管理接口只监听本机，用随机强密钥（mgmt.json，0600），只有 dsh-cpamc 自己（CLI 与守护进程）使用；
 // 浏览器永远拿不到它。用途：来源登录（OAuth）、停用 / 启用 / 删除凭据、读取用量记录。
 // 接口格式对照 v8.0.13 实测（2026-10-09）：
 //   GET  /oauth/auth-url?provider=  → {status,url,state,flow?:"device",user_code?,expires_in?}
@@ -89,7 +89,7 @@ export class Mgmt {
 
   static async forCtx(ctx: Ctx, port: number): Promise<Mgmt> {
     const cfg = await loadMgmt(ctx)
-    if (!cfg) throw new DshModelError('mgmt_not_configured', L('引擎管理接口还没配置（dsh-model setup）', 'Engine management API not configured (dsh-model setup)'))
+    if (!cfg) throw new DshModelError('mgmt_not_configured', L('引擎管理接口还没配置（dsh-cpamc setup）', 'Engine management API not configured (dsh-cpamc setup)'))
     return new Mgmt(port, cfg.secret)
   }
 
