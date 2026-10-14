@@ -63,6 +63,14 @@ describe('daemon core against a real engine', () => {
     expect(list.filter((s) => s.plugin).map((s) => s.id)).toEqual(['workbuddy', 'trae', 'qoder', 'zcode'])
   })
 
+  it('check-in: nothing signed in yet means nothing to check in; auto check-in is on by default', async () => {
+    expect(await daemon.checkinStatus()).toEqual({ auto: true, sources: [] })
+    await expect(daemon.checkin('zcode')).rejects.toThrow()
+    expect(await daemon.setAutoCheckin(false)).toEqual({ auto: false })
+    expect((await daemon.checkinStatus()).auto).toBe(false)
+    await daemon.setAutoCheckin(true)
+  }, 30_000)
+
   it('show / hide only changes what dsh sees', async () => {
     expect(await daemon.setShown('trae', false)).toEqual({ shown: false })
     expect((await daemon.sources()).find((s) => s.id === 'trae')?.shown).toBe(false)

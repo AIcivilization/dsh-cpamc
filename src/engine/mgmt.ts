@@ -93,8 +93,8 @@ export class Mgmt {
     return new Mgmt(port, cfg.secret)
   }
 
-  private async call<T>(method: string, path: string, body?: unknown, timeoutMs = 15_000): Promise<T> {
-    const res = await fetch(`http://127.0.0.1:${this.port}/v8/management${path}`, {
+  private async call<T>(method: string, path: string, body?: unknown, timeoutMs = 15_000, base = '/v8/management'): Promise<T> {
+    const res = await fetch(`http://127.0.0.1:${this.port}${base}${path}`, {
       method,
       headers: { Authorization: `Bearer ${this.secret}`, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
       body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -112,6 +112,12 @@ export class Mgmt {
       throw new DshModelError('mgmt_error', L(`引擎管理接口 ${method} ${path} 失败（HTTP ${res.status}）：${msg}`, `Engine management ${method} ${path} failed (HTTP ${res.status}): ${msg}`))
     }
     return data as T
+  }
+
+  /** 渠道插件自己的管理接口：/v0/management/plugins/<id>/<path>（签到、余额、账号列表） */
+  plugin<T = unknown>(method: 'GET' | 'POST', id: string, path: string, body?: unknown, timeoutMs = 30_000): Promise<T> {
+    if (!/^[a-z0-9-]+$/.test(id) || !/^[a-z0-9/_-]+(\?[a-z0-9=&_-]*)?$/i.test(path)) throw new DshModelError('bad_plugin_path', `bad plugin path: ${id}/${path}`)
+    return this.call<T>(method, `/plugins/${id}/${path}`, body, timeoutMs, '/v0/management')
   }
 
   authUrl(provider: string): Promise<AuthUrlResult> {

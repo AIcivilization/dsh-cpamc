@@ -132,6 +132,15 @@ describe('settings page rendering', () => {
     expect(manual).not.toContain('<button')
   })
 
+  it('check-in line', () => {
+    const m = load('zh-CN')
+    expect(render(m, 'CheckinLine', { status: { source: 'workbuddy', checkedToday: true, streakDays: 3 }, reload: noop })).toContain('今天已签到（连续 3 天）')
+    const todo = render(m, 'CheckinLine', { status: { source: 'trae', checkedToday: false }, reload: noop })
+    expect(todo).toContain('今天还没签到')
+    expect(todo).toContain('签到</button>')
+    expect(render(m, 'CheckinLine', { status: undefined, reload: noop })).toBe('')
+  })
+
   it('source status labels', () => {
     const m = load('en')
     expect(m.__test.statusOf({ loggedIn: false }).text).toBe('Signed out')

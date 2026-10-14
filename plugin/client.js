@@ -345,6 +345,29 @@ window.__ModuleLoader__.load({
         d.tokensPerSec != null ? `${d.tokensPerSec} tokens/s` : L('速度暂不可用', 'speed n/a'))
     }
 
+    /** 签到一行：今天签了没（连续几天）+「签到」按钮 */
+    function CheckinLine({ status, reload }) {
+      const [busy, setBusy] = useState(false)
+      const [msg, setMsg] = useState('')
+      if (!status) return null
+      const go = async () => {
+        setBusy(true); setMsg('')
+        try {
+          const r = await api('POST', `/checkin/${status.source}`)
+          setMsg(r.reward ? L(`签到成功：${r.reward}`, `Checked in: ${r.reward}`) : L('签到成功', 'Checked in'))
+          await reload()
+        } catch (e) { setMsg(e.message) } finally { setBusy(false) }
+      }
+      const done = status.checkedToday === true
+      const text = done
+        ? L(`今天已签到${status.streakDays ? `（连续 ${status.streakDays} 天）` : ''}`, `Checked in today${status.streakDays ? ` (${status.streakDays}-day streak)` : ''}`)
+        : status.checkedToday === false ? L('今天还没签到', 'Not checked in today') : L('今天的签到状态暂时查不到', 'Today\'s check-in status is unavailable')
+      return h('div', { style: { ...S.line, minHeight: 22, paddingLeft: 46, marginTop: 2, fontSize: 12, color: done ? C.ok : C.sub } },
+        h('span', null, text),
+        !done ? h('button', { type: 'button', style: { ...S.btn, padding: '1px 8px' }, disabled: busy, onClick: go }, busy ? L('签到中…', 'Checking in…') : L('签到', 'Check in')) : null,
+        msg ? h('span', { style: { color: C.sub } }, msg) : null)
+    }
+
     /** 勾选这个来源的哪些模型显示在 dsh 里（引擎照常提供全部） */
     function ModelPicker({ source, onClose }) {
       const [data, setData] = useState(null)
@@ -394,7 +417,7 @@ window.__ModuleLoader__.load({
           h('button', { type: 'button', style: S.btn, onClick: () => onClose(false) }, L('取消', 'Cancel'))))
     }
 
-    function ModelsSection({ sources, stats, reload, openPanel }) {
+    function ModelsSection({ sources, stats, checkin, reload, openPanel }) {
       const [picking, setPicking] = useState('')
       const [busy, setBusy] = useState({})
       const [err, setErr] = useState('')
@@ -443,6 +466,7 @@ window.__ModuleLoader__.load({
               !s.loggedIn ? h('button', { type: 'button', style: S.btn, onClick: openPanel }, L('在全部功能中登录', 'Sign in under All features')) : null),
             picking === s.id ? h(ModelPicker, { source: s, onClose: (saved) => { setPicking(''); if (saved) void reload() } }) : null,
             s.loggedIn ? h(SourceStats, { st: stats?.bySource?.[s.id] }) : null,
+            s.loggedIn ? h(CheckinLine, { status: checkin?.sources?.find((c) => c.source === s.id), reload }) : null,
             s.loggedIn ? h(Usage, { usage: s.usage, subscribeUrl: s.subscribeUrl }) : null,
             !s.loggedIn ? h('div', { style: { ...S.meta, paddingLeft: 46, marginTop: 4 } },
               L(s.pricing.zh, s.pricing.en),
@@ -514,7 +538,7 @@ window.__ModuleLoader__.load({
     }
 
     // —— 服务（R2 ③）——
-    function ServiceSection({ service, reload }) {
+    function ServiceSection({ service, checkin, reload }) {
       const [busy, setBusy] = useState('')
       const [msg, setMsg] = useState('')
       // Hook 必须在提前返回之前调用（每次渲染数量一致）
@@ -534,6 +558,10 @@ window.__ModuleLoader__.load({
           row(L('服务版本', 'Service version'), e.version ? `v${e.version}` : '-'),
           row(L('渠道插件', 'Channel plugins'), service.components.plugins ? `v${service.components.plugins}` : '-'),
           row(L('完整管理界面', 'Full interface'), service.components.panel ? `v${service.components.panel}` : '-'),
+          checkin ? h('div', { style: { ...S.line, minHeight: 26 } },
+            h('span', { style: { ...S.meta, width: 110, flex: 'none' } }, L('每日自动签到', 'Daily check-in')),
+            h(Switch, { on: checkin.auto, label: L('每日自动签到', 'Daily check-in'), onChange: async (on) => { try { await api('POST', '/checkin/auto', { on }); await reload(false) } catch (e) { setMsg(e.message) } } }),
+            h('span', { style: S.meta }, L('WorkBuddy、Trae、Qoder 登录后每天自动签到一次', 'WorkBuddy, Trae and Qoder check in once a day after sign-in'))) : null,
           service.mode === 'vps' ? row(L('部署位置', 'Deployed on'), L('服务器', 'Server')) : null,
           service.mode === 'vps' && service.remote.publicUrl ? row(L('外部地址', 'Public address'), service.remote.publicUrl) : null,
           h('div', { style: { ...S.line, marginTop: 8 } },
@@ -793,14 +821,15 @@ window.__ModuleLoader__.load({
       const openPanel = useRef(null)
       const load = useCallback(async (refresh) => {
         try {
-          const [sources, keys, stats, endpoints, service] = await Promise.all([
+          const [sources, keys, stats, endpoints, service, checkin] = await Promise.all([
             api('GET', refresh ? '/sources?refresh=1' : '/sources'),
             api('GET', '/keys-info'),
             api('GET', '/stats'),
             api('GET', '/endpoints').catch(() => null),
             api('GET', '/service').catch(() => null),
+            api('GET', '/checkin').catch(() => null),
           ])
-          if (alive.current) { setData({ sources, keys, stats, endpoints, service }); setErr(''); setErrCode('') }
+          if (alive.current) { setData({ sources, keys, stats, endpoints, service, checkin }); setErr(''); setErrCode('') }
         } catch (e) {
           if (alive.current) { setErr(e.hint ? `${e.message}（${e.hint}）` : e.message); setErrCode(e.code || '') }
         }
@@ -825,9 +854,9 @@ window.__ModuleLoader__.load({
       if (!data) return page(h('div', { style: { fontSize: 13, color: err ? C.err : C.sub, padding: '8px 0' } }, err || L('加载中…', 'Loading…')))
       return page([
         err ? h('div', { key: 'err', style: { fontSize: 12, color: C.err, marginBottom: 12 } }, err) : null,
-        h(ModelsSection, { key: 'models', sources: data.sources, stats: data.stats, reload: () => load(false), openPanel: () => openPanel.current?.() }),
+        h(ModelsSection, { key: 'models', sources: data.sources, stats: data.stats, checkin: data.checkin, reload: () => load(false), openPanel: () => openPanel.current?.() }),
         h(KeysSection, { key: 'keys', info: data.keys, endpoints: data.endpoints, reload: () => load(false) }),
-        h(ServiceSection, { key: 'service', service: data.service, reload: load }),
+        h(ServiceSection, { key: 'service', service: data.service, checkin: data.checkin, reload: load }),
         isLoopbackPage() ? h(DeploySection, { key: 'deploy' }) : null,
         h(FullFeaturesCard, { key: 'full', openRef: openPanel, endpoints: data.endpoints }),
       ])
@@ -870,7 +899,7 @@ window.__ModuleLoader__.load({
       }
     }
 
-    module.exports = { name, inject, apply, __test: { RestartBanner, until, pct, ms, statusOf, newer, Boundary, panelTarget, Header, ModelsSection, KeysSection, ServiceSection, FullFeaturesCard, Onboarding, SelfProgress, SettingsSection, DeploySection } }
+    module.exports = { name, inject, apply, __test: { RestartBanner, CheckinLine, until, pct, ms, statusOf, newer, Boundary, panelTarget, Header, ModelsSection, KeysSection, ServiceSection, FullFeaturesCard, Onboarding, SelfProgress, SettingsSection, DeploySection } }
     return module.exports
   },
 })

@@ -39,6 +39,7 @@ import { riskNotice as upstreamRiskNotice } from '../upstreams.js'
 import { getUpstream } from '../upstreams.js'
 import { redactKey } from '../util/redact.js'
 import { Stats, type StatsSnapshot } from './stats.js'
+import { CHECKIN_SOURCES, describeReward, loadLedger, mergeStatus, parseTraeCredits, parseWorkbuddyAccounts, recordCheckin, type CheckinStatus } from './checkin.js'
 import { USAGE_UNSUPPORTED, probeEngineSource, fetchEngineUsage, usageFilePath, type SourceUsage } from './usage.js'
 import { writeJson } from '../util/fs.js'
 
@@ -133,6 +134,9 @@ export class Daemon {
     this.timers.push(setInterval(() => void this.stats.save().catch(() => {}), STATS_SAVE_MS))
     this.timers.push(setInterval(() => void this.reloadKeyNames(), STATS_SAVE_MS))
     this.timers.push(setInterval(() => void this.refreshUsage(), USAGE_REFRESH_MS))
+    // 每日签到：启动一分钟后看一次，之后每小时一次（今天已签过的跳过）
+    setTimeout(() => void this.autoCheckin(), 60_000)
+    this.timers.push(setInterval(() => void this.autoCheckin(), 60 * 60 * 1000))
     setTimeout(() => void this.refreshUsage(), 3000)
   }
 
@@ -290,6 +294,83 @@ export class Daemon {
     const m = await this.mgmt()
     for (const c of credsFor(await m.credentials(), def)) await m.deleteCredential(c.name)
     await this.resync()
+  }
+
+  // —— 每日签到（daemon/checkin.ts）——
+
+  /** 已登录的、支持签到的渠道 */
+  private async checkinTargets(): Promise<string[]> {
+    const states = await this.sourcesRaw().catch(() => [] as SourceState[])
+    return CHECKIN_SOURCES.filter((id) => states.some((s) => s.id === id && s.loggedIn))
+  }
+
+  async checkinStatus(): Promise<{ auto: boolean; sources: CheckinStatus[] }> {
+    const all = await loadAll(this.ctx)
+    const ledger = await loadLedger(this.ctx.paths.home)
+    const out: CheckinStatus[] = []
+    let m: Mgmt | null = null
+    try {
+      m = await this.mgmt()
+    } catch {
+      // 引擎没起来：只看本地记录
+    }
+    for (const id of await this.checkinTargets()) {
+      let api: Pick<CheckinStatus, 'checkedToday' | 'streakDays'> = { checkedToday: null }
+      let error: string | undefined
+      try {
+        if (m && id === 'workbuddy') api = parseWorkbuddyAccounts(await m.plugin('GET', id, 'accounts'))
+        if (m && id === 'trae') api = parseTraeCredits(await m.plugin('GET', id, 'credits'))
+      } catch (e) {
+        error = String((e as Error).message ?? e).slice(0, 160)
+      }
+      out.push({ ...mergeStatus(id, api, ledger), ...(error ? { error } : {}) })
+    }
+    return { auto: all.config.autoCheckin !== false, sources: out }
+  }
+
+  /** 签到一个渠道（全部账号）；成功记进本地记录 */
+  async checkin(id: string): Promise<{ source: string; ok: true; reward?: string }> {
+    if (!(CHECKIN_SOURCES as readonly string[]).includes(id)) throw new DshModelError('no_checkin', L(`${id} 不支持签到`, `${id} has no check-in`))
+    const r = await (await this.mgmt()).plugin('POST', id, 'checkin', {})
+    const reward = describeReward(r)
+    await recordCheckin(this.ctx.paths.home, id, reward, this.ctx.owner)
+    log(`daemon: checked in ${id}${reward ? ` (${reward})` : ''}`)
+    void this.refreshUsage()
+    return { source: id, ok: true, ...(reward ? { reward } : {}) }
+  }
+
+  async setAutoCheckin(on: boolean): Promise<{ auto: boolean }> {
+    await withLock(this.ctx, async () => {
+      const all = await loadAll(this.ctx)
+      all.config.autoCheckin = on
+      await saveAll(this.ctx, all)
+    })
+    if (on) void this.autoCheckin()
+    return { auto: on }
+  }
+
+  private autoRunning = false
+  /** 自动签到：已登录、今天还没签过的渠道（以本地记录为准，接口说签过也跳过） */
+  async autoCheckin(): Promise<void> {
+    if (this.autoRunning) return
+    this.autoRunning = true
+    try {
+      const all = await loadAll(this.ctx)
+      if (all.config.autoCheckin === false) return
+      const status = await this.checkinStatus()
+      for (const s of status.sources) {
+        if (s.checkedToday === true) continue
+        try {
+          await this.checkin(s.source)
+        } catch (e) {
+          log(`daemon: auto check-in ${s.source} failed: ${String((e as Error).message ?? e)}`)
+        }
+      }
+    } catch {
+      // 下个小时再试
+    } finally {
+      this.autoRunning = false
+    }
   }
 
   // —— 订阅用量 ——
@@ -806,6 +887,9 @@ export class Daemon {
       }
       if (method === 'GET' && path === '/stats') return ok(this.statsSnapshot())
       if (method === 'GET' && path === '/keys-info') return ok(await this.keysInfo())
+      if (method === 'GET' && path === '/checkin') return ok(await this.checkinStatus())
+      if (method === 'POST' && path === '/checkin/auto') return ok(await this.setAutoCheckin(b.on !== false))
+      if (method === 'POST' && seg[0] === 'checkin' && seg[1] && seg[1] !== 'auto') return ok(await this.checkin(seg[1]))
       if (method === 'GET' && path === '/service') return ok(await this.serviceInfo())
       if (method === 'POST' && path === '/service/restart') return ok(await this.restartEngine())
       if (method === 'POST' && path === '/panel/open') return ok(await this.panelOpen())

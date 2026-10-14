@@ -25,6 +25,8 @@ export interface Config {
   dshModels?: Record<string, string[]>
   /** 在 dsh 里隐藏的来源（显示 / 隐藏开关）；引擎里的凭据不受影响 */
   hiddenSources?: string[]
+  /** 每日自动签到（WorkBuddy、Trae、Qoder）；不写 = 开 */
+  autoCheckin?: boolean
   /** 守护进程（服务名沿用 bridge） */
   bridge?: { port: number }
 }

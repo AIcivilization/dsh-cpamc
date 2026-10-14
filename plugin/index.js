@@ -46,6 +46,8 @@ const ALLOWED = [
   ['GET', /^\/sources\/[a-z-]{2,20}\/models$/],
   ['POST', /^\/sources\/[a-z-]{2,20}\/models$/],
   ['POST', /^\/sources\/[a-z-]{2,20}\/(show|hide)$/],
+  ['GET', /^\/checkin$/],
+  ['POST', /^\/checkin\/(workbuddy|trae|qoder|auto)$/],
 ]
 
 function home() {
