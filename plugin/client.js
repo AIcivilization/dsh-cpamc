@@ -197,6 +197,39 @@ window.__ModuleLoader__.load({
       return { text: L('已登录', 'Signed in'), color: C.ok }
     }
 
+    // —— 插件已更新、但 dsh 还在跑旧代码：页面顶部提示（改写自 dsh-model）——
+    async function hostCall(body, retried) {
+      const r = await fetch('/api-dsh-cpamc/host', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-dsh-cpamc-token': token }, body: JSON.stringify(body) })
+      const j = await r.json().catch(() => ({}))
+      if (r.status === 403 && !retried && j?.error?.code === 'refused') {
+        await refreshToken()
+        return hostCall(body, true)
+      }
+      if (!r.ok) throw new Error(j?.error?.message || `HTTP ${r.status}`)
+      return j
+    }
+
+    function RestartBanner({ host }) {
+      const [state, setState] = useState('')
+      if (!host || !host.installed || !host.running || host.installed === host.running) return null
+      const restart = async () => {
+        if (!window.confirm(L('重启 dsh？正在进行的对话会中断，重启后自动恢复。', 'Restart dsh? Ongoing conversations are interrupted and resume after the restart.'))) return
+        setState('restarting')
+        try {
+          await hostCall({ action: 'restart' })
+        } catch (e) {
+          setState(e.message)
+        }
+      }
+      return h('div', { style: { ...S.card, padding: '10px 14px', marginBottom: 16, borderColor: C.warn } },
+        h('div', { style: S.line },
+          h('span', { style: { ...S.grow, fontSize: 13, color: C.text } },
+            L(`dsh-cpamc 已更新到 v${host.installed}，但 dsh 还在运行 v${host.running} 的代码，重启 dsh 后生效。`, `dsh-cpamc was updated to v${host.installed}, but dsh is still running v${host.running}; restart dsh to apply it. `),
+            host.restart !== 'desktop' ? h('span', { style: { color: C.sub } }, L('请重启 dsh（桌面版请完全退出再打开，Windows 上连同右下角托盘图标；服务器上请重启运行 dsh 的服务）。', 'Please restart dsh (desktop: quit completely and reopen, on Windows including the tray icon; on a server, restart the service that runs dsh).')) : null),
+          host.restart === 'desktop' ? h('button', { type: 'button', style: S.btnPrimary, disabled: state === 'restarting', onClick: () => void restart() }, state === 'restarting' ? L('正在重启…', 'Restarting…') : L('重启 dsh', 'Restart dsh')) : null),
+        state && state !== 'restarting' ? h('div', { style: { fontSize: 12, color: C.err, marginTop: 6 } }, state) : null)
+    }
+
     // —— 页眉（R7）——
     /** a 是否比 b 新（语义化版本：正式版 > 预发布版，alpha.6 > alpha.3；与命令行的 compareVersions 同一规则） */
     const newer = (a, b) => {
@@ -755,6 +788,7 @@ window.__ModuleLoader__.load({
       const [err, setErr] = useState('')
       const [errCode, setErrCode] = useState('')
       const [selfJob, setSelfJob] = useState(null)
+      const [host, setHost] = useState(null)
       const alive = useRef(true)
       const openPanel = useRef(null)
       const load = useCallback(async (refresh) => {
@@ -772,13 +806,20 @@ window.__ModuleLoader__.load({
         }
       }, [])
       useEffect(() => {
+        let stop = false
+        const check = () => hostCall({}).then((r) => { if (!stop) setHost(r) }, () => {})
+        void check()
+        const t = setInterval(check, 60_000)
+        return () => { stop = true; clearInterval(t) }
+      }, [])
+      useEffect(() => {
         alive.current = true
         void load(true)
         api('GET', '/self').then((r) => alive.current && setSelf(r), () => {})
         const t = setInterval(() => void load(false), 15000)
         return () => { alive.current = false; clearInterval(t) }
       }, [load])
-      const page = (children) => h('div', { style: { color: C.text, maxWidth: 860 } }, h(Header, { self, onJob: setSelfJob }), children)
+      const page = (children) => h('div', { style: { color: C.text, maxWidth: 860 } }, h(Header, { self, onJob: setSelfJob }), h(RestartBanner, { host }), children)
       if (selfJob) return page(h(SelfProgress, { job: selfJob, onDone: () => { setSelfJob(null); void load(true) } }))
       if (errCode === 'daemon_not_configured' || errCode === 'daemon_unreachable') return page(h(Onboarding, { code: errCode, onDone: () => void load(true) }))
       if (!data) return page(h('div', { style: { fontSize: 13, color: err ? C.err : C.sub, padding: '8px 0' } }, err || L('加载中…', 'Loading…')))
@@ -829,7 +870,7 @@ window.__ModuleLoader__.load({
       }
     }
 
-    module.exports = { name, inject, apply, __test: { until, pct, ms, statusOf, newer, Boundary, panelTarget, Header, ModelsSection, KeysSection, ServiceSection, FullFeaturesCard, Onboarding, SelfProgress, SettingsSection, DeploySection } }
+    module.exports = { name, inject, apply, __test: { RestartBanner, until, pct, ms, statusOf, newer, Boundary, panelTarget, Header, ModelsSection, KeysSection, ServiceSection, FullFeaturesCard, Onboarding, SelfProgress, SettingsSection, DeploySection } }
     return module.exports
   },
 })

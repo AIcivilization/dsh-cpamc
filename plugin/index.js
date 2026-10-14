@@ -152,6 +152,26 @@ function startCli(action, args) {
 
 const DEPLOY_PATH = '/api/dsh-cpamc.deploy'
 
+/** 这份代码加载时的版本：插件装了新版但 dsh 没重启时，它和磁盘上的版本不一样（改写自 dsh-model） */
+const RUNNING_VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(join(PKG_ROOT, 'package.json'), 'utf8')).version
+  } catch {
+    return ''
+  }
+})()
+
+async function installedVersion() {
+  try {
+    return JSON.parse(await readFile(join(PKG_ROOT, 'package.json'), 'utf8')).version
+  } catch {
+    return RUNNING_VERSION
+  }
+}
+
+/** dsh 桌面版提供的重启（dsh 自己的服务，可选）；没有就让用户手动重启 */
+const hostDeps = { desktopActions: undefined }
+
 function pkgVersion() {
   try {
     return JSON.parse(readFileSync(join(PKG_ROOT, 'package.json'), 'utf8')).version
@@ -184,6 +204,14 @@ async function fixProfileExcludes() {
 export function apply(ctx) {
   const token = randomBytes(24).toString('hex')
   void fixProfileExcludes()
+
+  ctx.inject(['desktopActions'], (dCtx) => {
+    const actions = dCtx.desktopActions
+    hostDeps.desktopActions = actions
+    dCtx.effect?.(() => () => {
+      if (hostDeps.desktopActions === actions) hostDeps.desktopActions = undefined
+    }, 'dsh-cpamc: desktop actions')
+  })
 
   // 部署到服务器（设计 §9.1）：挂在 dsh 的 /api 通道，dsh 自己做同源与登录校验。没有 connection.fetch 的旧版 dsh 不注册
   ctx.inject(['connection'], (connCtx) => {
@@ -311,6 +339,33 @@ export function apply(ctx) {
           const action = body.action === 'repair' ? 'repair' : 'setup'
           const lang = body.lang === 'en' ? 'en' : 'zh'
           return json(res, 202, startCli(action, action === 'repair' ? ['repair', '--lang', lang] : ['setup', '--skip-dsh-plugin', '--lang', lang]))
+        },
+      }),
+    )
+
+    // 插件版本与重启：装了新版但 dsh 还在跑旧代码时，页面提示；桌面版可一键重启（dsh 自己的 desktopActions）
+    track(
+      ws.register({
+        kind: 'exact',
+        path: '/api-dsh-cpamc/host',
+        handler: async (req, res) => {
+          const bad = check(req, token)
+          if (bad) return json(res, bad.code, { error: { code: 'refused', message: bad.error } })
+          let body
+          try {
+            body = JSON.parse((await readBody(req)) || '{}')
+          } catch {
+            return json(res, 400, { error: { code: 'invalid_json', message: 'invalid JSON' } })
+          }
+          const canRestart = typeof hostDeps.desktopActions?.requestRestart === 'function'
+          if (body.action !== 'restart') return json(res, 200, { running: RUNNING_VERSION, installed: await installedVersion(), restart: canRestart ? 'desktop' : 'manual' })
+          if (!canRestart) return json(res, 409, { error: { code: 'restart_unsupported', message: 'restart dsh manually' } })
+          try {
+            await hostDeps.desktopActions.requestRestart()
+          } catch (e) {
+            return json(res, 500, { error: { code: 'restart_failed', message: String(e?.message ?? e) } })
+          }
+          return json(res, 200, { restarting: true })
         },
       }),
     )

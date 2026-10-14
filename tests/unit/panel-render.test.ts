@@ -121,6 +121,17 @@ describe('settings page rendering', () => {
     expect(header).toContain('Update to v0.1.0-alpha.6')
   })
 
+  it('tells the user to restart dsh after the plugin was updated', () => {
+    const m = load('zh-CN')
+    expect(render(m, 'RestartBanner', { host: { running: '0.1.1', installed: '0.1.1', restart: 'manual' } })).toBe('')
+    const desktop = render(m, 'RestartBanner', { host: { running: '0.1.1', installed: '0.1.2', restart: 'desktop' } })
+    expect(desktop).toContain('v0.1.2')
+    expect(desktop).toContain('重启 dsh')
+    const manual = render(m, 'RestartBanner', { host: { running: '0.1.1', installed: '0.1.2', restart: 'manual' } })
+    expect(manual).toContain('请重启 dsh')
+    expect(manual).not.toContain('<button')
+  })
+
   it('source status labels', () => {
     const m = load('en')
     expect(m.__test.statusOf({ loggedIn: false }).text).toBe('Signed out')
