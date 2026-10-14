@@ -2,7 +2,7 @@
 
 **为 DeepSeek Harness（DSH）提供模型：装一个插件，就能在 DSH 里使用和管理多个模型来源。**
 
-> **状态：0.1.0 alpha，还没有发布到 npm。** npm 上现有的 `dsh-cpamc` 是早期占位包，没有功能。下面标「已实现」的部分已在 macOS（Apple 芯片）上用真实组件测试过；其他平台和 VPS 还在验证中。
+> **状态：早期版本（0.1.x），已发布到 npm。** 下面标「已实现」的部分已在 macOS（Apple 芯片）上用真实组件和真实 DSH 测试过；其他平台和服务器上还在验证中。
 
 dsh-cpamc 在 [dsh-model](https://github.com/AIcivilization/dsh-model) 的基础上开发。
 
@@ -87,7 +87,7 @@ MIT，见 [LICENSE](./LICENSE)。
 
 **A model provider for DeepSeek Harness (DSH): install one plugin to use and manage several model sources inside DSH.**
 
-> **Status: 0.1.0 alpha, not yet published to npm.** The current `dsh-cpamc` package on npm is an early placeholder. Parts marked as done have been tested with real components on macOS (Apple silicon); other platforms and VPS are still being verified.
+> **Status: early release (0.1.x), published on npm.** Parts marked as done have been tested with real components and a real DSH on macOS (Apple silicon); other platforms and servers are still being verified.
 
 Built on [dsh-model](https://github.com/AIcivilization/dsh-model):
 
