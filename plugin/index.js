@@ -162,8 +162,28 @@ function pkgVersion() {
 
 const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
 
+/**
+ * dsh 每次加载插件时：合并所在 profile 的 pnpm 例外名单里同一个包的多行（pnpm 只认第一行，
+ * 别的插件自动更新时追加的新行不生效，之后往这个 profile 装任何插件都会被拦下）。改之前备份；失败不影响别的。
+ */
+async function fixProfileExcludes() {
+  const m = /^(.*[\\/]profiles[\\/][^\\/]+)[\\/]node_modules[\\/]dsh-cpamc[\\/]?$/.exec(PKG_ROOT)
+  if (!m) return
+  try {
+    const { fixReleaseAgeExcludes } = await import('../dist/dsh/pnpm-policy.js')
+    const backups = join(home(), 'backups')
+    const { mkdir } = await import('node:fs/promises')
+    await mkdir(backups, { recursive: true })
+    const backup = await fixReleaseAgeExcludes(m[1], backups)
+    if (backup) console.warn(`[dsh-cpamc] merged duplicate pnpm minimumReleaseAgeExclude entries in ${m[1]} (backup: ${backup})`)
+  } catch {
+    // 修不了就算了
+  }
+}
+
 export function apply(ctx) {
   const token = randomBytes(24).toString('hex')
+  void fixProfileExcludes()
 
   // 部署到服务器（设计 §9.1）：挂在 dsh 的 /api 通道，dsh 自己做同源与登录校验。没有 connection.fetch 的旧版 dsh 不注册
   ctx.inject(['connection'], (connCtx) => {

@@ -8,7 +8,7 @@ import { fixReleaseAgeExcludes } from '../dsh/pnpm-policy.js'
 import { lstat, realpath, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Ctx } from '../context.js'
-import { dshPlugin, profileHasDependency } from '../dsh/cli.js'
+import { dshPlugin, dshPluginTee, profileHasDependency } from '../dsh/cli.js'
 import { resolveProfile } from '../dsh/locate.js'
 import { DshModelError } from '../errors.js'
 import { L } from '../i18n.js'
@@ -78,9 +78,22 @@ export async function installDshPlugin(ctx: Ctx, all: All, opts: { version?: str
   } catch {
     // 修不了就照常装：失败时下面会给出说明
   }
-  const code = await dshPlugin(ctx, profile, ['add', want.install, '--config.strict-dep-builds=false'], all.config.proxy)
+  const { code, output } = await dshPluginTee(ctx, profile, ['add', want.install, '--config.strict-dep-builds=false'], all.config.proxy)
   const installed = await profileHasDependency(ctx, profile, PLUGIN_NAME)
   if (code !== 0 || !installed) {
+    const blocked = releaseAgeBlocked(output)
+    if (blocked.length) {
+      // dsh 的 pnpm 不装「发布不满一天」的版本，而且整份插件清单一起查：别的插件刚更新也会把这次拦下
+      const until = blocked.map((b) => b.until).filter(Boolean).sort().pop()
+      throw new DshModelError(
+        'plugin_release_age',
+        L(`dsh 的插件安全规则（新发布的版本要等一段时间）拦下了这次安装：${blocked.map((b) => `${b.spec}（${b.published} 发布）`).join('、')}`, `dsh's plugin safety rule (new versions must wait) blocked this install: ${blocked.map((b) => `${b.spec} (published ${b.published})`).join(', ')}`),
+        L(
+          `这条规则检查 dsh 里的全部插件，不只是 dsh-cpamc。${until ? `大约 ${until} 之后` : '过一段时间后'}再执行一次 dsh-cpamc setup 即可；模型服务这一步不受影响`,
+          `It checks every plugin in dsh, not just dsh-cpamc. Run dsh-cpamc setup again ${until ? `after about ${until}` : 'later'}; the model service step is unaffected`,
+        ),
+      )
+    }
     throw new DshModelError(
       'plugin_install_failed',
       L(`把 dsh-cpamc 装进 dsh 失败（退出码 ${code}）`, `Failed to install dsh-cpamc into dsh (exit code ${code})`),
@@ -105,4 +118,23 @@ export async function removeDshPlugin(ctx: Ctx, all: All, opts: { force?: boolea
   }
   all.state.plugins = (all.state.plugins ?? []).filter((p) => p.name !== PLUGIN_NAME)
   return true
+}
+
+/**
+ * pnpm 的 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION：哪些包、什么时候发布的、大约什么时候放行（改写自 dsh-model）。
+ * 报错里给了截止时间（现在减去规则要求的时长），所以放行时间 = 发布时间 + (现在 − 截止时间)。时间按本地时区显示。
+ */
+export function releaseAgeBlocked(output: string, now = Date.now()): { spec: string; published: string; until: string }[] {
+  if (!/MINIMUM_RELEASE_AGE_VIOLATION/.test(output)) return []
+  const local = (t: number) => {
+    const d = new Date(t)
+    const p = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  }
+  return [...output.matchAll(/^\s*(\S+@\S+) was published at (\S+?), within the minimumReleaseAge cutoff \((\S+?)\)/gm)].map((m) => {
+    const published = Date.parse(m[2]!)
+    const cutoff = Date.parse(m[3]!)
+    const age = now - cutoff
+    return { spec: m[1]!, published: Number.isNaN(published) ? m[2]! : local(published), until: Number.isNaN(published) || Number.isNaN(cutoff) ? '' : local(published + age) }
+  })
 }
