@@ -15,6 +15,7 @@ import { supervise } from './service/windows.js'
 import { bridge } from './commands/bridge.js'
 import { panel } from './commands/panel.js'
 import { migrate } from './commands/migrate.js'
+import { certSync } from './commands/remote.js'
 import { loginInteractive, source, sources, stats } from './commands/sources.js'
 import { createContext } from './context.js'
 import { isDshModelError } from './errors.js'
@@ -71,8 +72,8 @@ function help(): string {
   disconnect-dsh                       还原 dsh 配置
   models [sync]                        列出模型 / 同步到 dsh
   key list|add|revoke|rotate <名称>     管理访问 key（每台设备一把）
-  remote enable --via ssh|tailscale|caddy [--domain D] / remote disable
-                                       让你自己的其他设备访问
+  remote enable --via port|ssh|tailscale|caddy [--domain D] / remote disable
+                                       让你自己的其他设备访问（服务器上默认 port：自己的 HTTPS 端口 9444）
   engine version|upgrade [版本]|rollback 引擎版本管理
   service status|install|start|stop|restart|uninstall
   repair                               按台账修复配置、服务与接线
@@ -101,8 +102,8 @@ Usage: dsh-cpamc <command> [options]
   disconnect-dsh                       Restore dsh config
   models [sync]                        List models / sync them to dsh
   key list|add|revoke|rotate <name>    Manage access keys (one per device)
-  remote enable --via ssh|tailscale|caddy [--domain D] / remote disable
-                                       Access from your other devices
+  remote enable --via port|ssh|tailscale|caddy [--domain D] / remote disable
+                                       Access from your other devices (servers default to port: its own HTTPS port 9444)
   engine version|upgrade [ver]|rollback  Engine version management
   service status|install|start|stop|restart|uninstall
   repair                               Repair config, service and wiring from the ledger
@@ -152,6 +153,9 @@ export async function main(argv: string[]): Promise<number> {
       case 'logout':
         if (!a1) throw new Error(L('用法：dsh-cpamc logout <来源>', 'Usage: dsh-cpamc logout <source>'))
         return await source(ctx, 'logout', a1, {})
+      case 'cert':
+        if (a1 !== 'sync') throw new Error(L('用法：dsh-cpamc cert sync', 'Usage: dsh-cpamc cert sync'))
+        return await certSync(ctx)
       case 'migrate':
         return await migrate(ctx)
       case 'panel':

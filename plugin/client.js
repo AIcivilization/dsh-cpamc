@@ -525,11 +525,18 @@ window.__ModuleLoader__.load({
         if (!window.confirm(L(`吊销 ${k.name}？用它的设备会立即无法访问。`, `Revoke ${k.name}? Devices using it lose access immediately.`))) return
         try { await api('DELETE', `/keys/${encodeURIComponent(k.name)}`); await reload() } catch (e) { setErr(e.message) }
       }
-      // 远程浏览器里打开（dsh 在服务器上）：其他设备经 dsh 自己的网址调模型，只认 API key
+      // 其他设备的地址：dsh-cpamc 自己的 HTTPS 端口（服务器上默认开）优先；远程浏览器里另外列出经 dsh 网址的那条
       const remote = !isLoopbackPage()
-      const external = remote ? `${pageOrigin()}/dsh-cpamc/v1` : endpoints?.public
+      const viaDsh = remote ? `${pageOrigin()}/dsh-cpamc/v1` : null
+      const tls = endpoints?.tls
+      const portNote = tls
+        ? tls.source === 'reuse'
+          ? L(`你的电脑、手机或其他软件用这个，只认 API key。证书：复用服务器上已有的正规证书（${String(tls.issuer || '').split(',')[0]}，${String(tls.notAfter || '').slice(0, 10)} 到期，每天自动同步）`, `Use this from your computer, phone or other tools; only the API key is checked. Certificate: the server's existing one (${String(tls.issuer || '').split(',')[0]}, expires ${String(tls.notAfter || '').slice(0, 10)}, synced daily)`)
+          : L(`你的电脑、手机或其他软件用这个，只认 API key。证书是自签的：软件里要先信任它（或关闭证书校验），指纹 ${tls.fingerprint}`, `Use this from your computer, phone or other tools; only the API key is checked. The certificate is self-signed: trust it in the software first (or turn off certificate checks); fingerprint ${tls.fingerprint}`)
+        : L('你的电脑、手机或其他软件用这个，只认 API key', 'Use this from your computer, phone or other tools; only the API key is checked')
       const addrs = endpoints ? [
-        ...(external ? [{ id: 'public', name: L('外部地址', 'Public'), url: external, note: L('你的电脑、手机或其他软件用这个，只认 API key。如果 dsh 前面的网关要求先登录，外部软件会被挡在网关外', 'Use this from your computer, phone or other tools; only the API key is checked. If a gateway in front of dsh requires sign-in, outside tools are stopped there') }] : []),
+        ...(endpoints.public ? [{ id: 'public', name: L('外部地址', 'Public'), url: endpoints.public, note: portNote, warn: endpoints.listening === false ? L('端口还没有开始监听：守护进程半分钟内会开；一直没开就在「服务」里点「修复」', 'The port is not listening yet: the daemon opens it within half a minute; if it never does, press Repair under Service') : '' }] : []),
+        ...(viaDsh ? [{ id: 'via-dsh', name: endpoints.public ? L('经 dsh 网址', 'Via dsh') : L('外部地址', 'Public'), url: viaDsh, note: L('经 dsh 自己的网址，只认 API key。如果 dsh 前面的网关要求先登录，外部软件会被挡在网关外——那就用上面那个地址', 'Through dsh\'s own address; only the API key is checked. If a gateway in front of dsh requires sign-in, outside tools are stopped there — use the address above instead') }] : []),
         { id: 'local', name: L('本机地址', 'Local'), url: endpoints.local, note: remote ? L('只在这台服务器上能用（dsh 自己用的就是它）', 'Only works on this server (dsh itself uses it)') : L('只在这台电脑上能用', 'Only works on this computer') },
       ] : []
       return h('div', { style: S.section },
@@ -541,7 +548,8 @@ window.__ModuleLoader__.load({
             h('span', { style: { ...S.label, width: 72, flex: 'none' } }, r.name),
             h('code', { style: { ...S.mono, ...S.grow, wordBreak: 'break-all' } }, r.url),
             h(CopyButton, { get: r.url })),
-          h('div', { style: { ...S.meta, paddingLeft: 82 } }, r.note)))) : null,
+          h('div', { style: { ...S.meta, paddingLeft: 82, wordBreak: 'break-all' } }, r.note),
+          r.warn ? h('div', { style: { ...S.meta, paddingLeft: 82, color: C.warn } }, r.warn) : null))) : null,
         err ? h('div', { style: { fontSize: 12, color: C.err, margin: '0 0 8px' } }, err) : null,
         fresh ? h('div', { style: { ...S.card, padding: 12, marginBottom: 10 } },
           h('div', { style: S.meta }, L(`新 key「${fresh.name}」只显示这一次：`, `New key "${fresh.name}" is shown only once:`)),

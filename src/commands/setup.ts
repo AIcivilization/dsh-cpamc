@@ -19,6 +19,7 @@ import { bold, info, next, ok, skip, warn } from '../util/output.js'
 import { findFreePort, isPortFree } from '../util/port.js'
 import { detectProxy, normalizeProxyUrl, redactProxy } from '../util/proxy.js'
 import { ensureDaemon } from '../daemon/service.js'
+import { enablePort } from './remote.js'
 import { dshModelHome, dshModelPorts, freePortAvoiding } from './migrate.js'
 import { installDshPlugin } from '../integrations/dshplugin.js'
 import { installAdmin } from '../service/admin.js'
@@ -84,7 +85,14 @@ export async function setup(ctx: Ctx, opts: SetupOptions): Promise<number> {
     // vps：让 dsh 管理页能直接点「更新 / 卸载」（root 执行，只认这两件事）
     if (ctx.mode === 'vps' && !ctx.serviceDisabled) await step('admin', () => installAdmin(ctx))
 
-    // 其他设备的模型地址经 dsh 自己的网址提供（<dsh 网址>/dsh-cpamc/v1，插件宿主端），不再往服务器上已有的 Caddy 里加站点
+    // 服务器上：开 dsh-cpamc 自己的 HTTPS 端口给其他设备用（证书复用服务器上已有的，没有就自签；见 remote/tls.ts）。
+    // <dsh 网址>/dsh-cpamc/v1 也照样提供，但 dsh 前面若有要求登录的网关，外部软件过不去
+    if (ctx.mode === 'vps') {
+      info('')
+      info(bold(L('对外端口', 'Public port')))
+      if (all.state.remote?.mode && all.state.remote.mode !== 'off' && all.state.remote.mode !== 'port') skip(L(`已用 ${all.state.remote.mode} 方式开放，保持不变`, `Already exposed via ${all.state.remote.mode}; unchanged`))
+      else await step('public-port', () => enablePort(ctx, all))
+    }
 
     info('')
     info(bold(L('同步到 dsh', 'Sync to dsh')))

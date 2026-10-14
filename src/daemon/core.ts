@@ -39,6 +39,8 @@ import { riskNotice as upstreamRiskNotice } from '../upstreams.js'
 import { getUpstream } from '../upstreams.js'
 import { redactKey } from '../util/redact.js'
 import { Stats, type StatsSnapshot } from './stats.js'
+import { createPublicEndpoint, type PublicEndpoint } from './public-endpoint.js'
+import { loadCertInfo, type CertInfo } from '../remote/tls.js'
 import { classify, recentFailures } from './failures.js'
 import { CHECKIN_SOURCES, describeReward, loadLedger, mergeStatus, parseTraeCredits, parseWorkbuddyAccounts, recordCheckin, type CheckinStatus } from './checkin.js'
 import { USAGE_UNSUPPORTED, probeEngineSource, fetchEngineUsage, usageFilePath, type SourceUsage } from './usage.js'
@@ -126,9 +128,16 @@ export class Daemon {
 
   // —— 生命周期 ——
 
+  private publicEndpoint?: PublicEndpoint
+  private enginePortCache = 8317
+
   async start(): Promise<void> {
     await this.stats.load()
     await this.reloadKeyNames()
+    // 对外的 HTTPS 端口（remote enable --via port）：按配置开 / 关，30 秒看一次
+    this.publicEndpoint = createPublicEndpoint(this.ctx.paths.home, () => this.enginePortCache, log)
+    void this.applyPublicEndpoint()
+    this.timers.push(setInterval(() => void this.applyPublicEndpoint(), 30_000))
     void this.watchCredentials()
     this.timers.push(setInterval(() => void this.watchCredentials(), CRED_WATCH_MS))
     this.timers.push(setInterval(() => void this.pollUsage(), USAGE_POLL_MS))
@@ -141,7 +150,19 @@ export class Daemon {
     setTimeout(() => void this.refreshUsage(), 3000)
   }
 
+  private async applyPublicEndpoint(): Promise<void> {
+    try {
+      const all = await loadAll(this.ctx)
+      this.enginePortCache = all.config.port
+      const on = all.config.remote.mode === 'port' && all.state.remote?.mode === 'port' && all.config.remote.publicPort
+      await this.publicEndpoint?.apply(on ? { port: all.config.remote.publicPort! } : null)
+    } catch {
+      // 下一轮再看
+    }
+  }
+
   async stop(): Promise<void> {
+    await this.publicEndpoint?.close().catch(() => {})
     for (const t of this.timers) clearInterval(t)
     clearTimeout(this.resyncTimer)
     for (const s of this.sessions.values()) s.abort?.abort()
@@ -774,10 +795,17 @@ export class Daemon {
   }
 
   /** 访问地址：本机地址总有；vps 开了对外端点时还有公网地址 */
-  async endpoints(): Promise<{ local: string; public?: string }> {
+  async endpoints(): Promise<{ local: string; public?: string; tls?: CertInfo; listening?: boolean }> {
     const all = await loadAll(this.ctx)
-    const pub = all.state.remote?.mode === 'caddy' ? all.state.remote.publicUrl : undefined
-    return { local: `http://127.0.0.1:${all.config.port}/v1`, ...(pub ? { public: pub } : {}) }
+    const mode = all.state.remote?.mode
+    const pub = mode === 'caddy' || mode === 'port' ? all.state.remote?.publicUrl : undefined
+    const tls = mode === 'port' ? await loadCertInfo(this.ctx.paths.home) : null
+    return {
+      local: `http://127.0.0.1:${all.config.port}/v1`,
+      ...(pub ? { public: pub } : {}),
+      ...(tls ? { tls } : {}),
+      ...(mode === 'port' ? { listening: this.publicEndpoint?.port === all.config.remote.publicPort } : {}),
+    }
   }
 
   /** 新增：返回完整 key（只这一次） */

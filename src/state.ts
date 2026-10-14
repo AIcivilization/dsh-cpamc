@@ -11,7 +11,7 @@ import { ensureDir, readJson, writeJson } from './util/fs.js'
 export const DEFAULT_PORT = 8317
 export const PROVIDER_ID = 'dsh-cpamc'
 
-export type RemoteMode = 'off' | 'ssh' | 'tailscale' | 'caddy'
+export type RemoteMode = 'off' | 'ssh' | 'tailscale' | 'caddy' | 'port'
 
 export interface Config {
   port: number
@@ -72,7 +72,9 @@ export interface State {
     caddyImportLine?: string
     caddyfile?: string
     tailscaleHttpsPort?: number
-    /** caddy：对外地址与放行的防火墙端口 */
+    /** port：dsh-cpamc 自己的 HTTPS 端口；证书同步的定时任务 */
+    certTimer?: string[]
+    /** caddy / port：对外地址与放行的防火墙端口 */
     publicUrl?: string
     firewallPort?: number
   }

@@ -82,7 +82,7 @@ export async function uninstall(ctx: Ctx, opts: { yes?: boolean; keepAuth?: bool
   // 端口要真的放出来才算卸载干净（R11）：只等、不杀——端口上要是别的程序，那不是我们能动的。
   // 引擎优雅退出会等后台网络请求，网络慢时要将近 30 秒（实测）；系统服务管理器到时会强制结束它（launchd 20 秒）
   await step('ports', async () => {
-    const ports = [all.config.port, all.config.bridge?.port].filter((p): p is number => typeof p === 'number' && p > 0)
+    const ports = [all.config.port, all.config.bridge?.port, all.config.remote.mode === 'port' ? all.config.remote.publicPort : undefined].filter((p): p is number => typeof p === 'number' && p > 0)
     const busy = await waitPortsFree(ports, 40_000)
     if (busy.length) throw new Error(L(`端口 ${busy.join('、')} 仍被占用：服务可能还没完全退出，稍后再执行一次卸载`, `Port(s) ${busy.join(', ')} still in use: the service may not have exited yet; run uninstall again shortly`))
     ok(L(`端口 ${ports.join('、')} 已释放`, `Port(s) ${ports.join(', ')} released`))
