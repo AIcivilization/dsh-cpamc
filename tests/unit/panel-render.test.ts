@@ -141,6 +141,14 @@ describe('settings page rendering', () => {
     expect(render(m, 'CheckinLine', { status: undefined, reload: noop })).toBe('')
   })
 
+  it('recent failures card only appears when something failed', () => {
+    const m = load('zh-CN')
+    expect(render(m, 'FailuresCard', { failures: [] })).toBe('')
+    const html = render(m, 'FailuresCard', { failures: [{ at: new Date().toISOString(), model: 'trae/glm-5.3', source: 'trae', status: 429, message: 'rate limited', kind: 'rate', advice: '被限流' }] })
+    expect(html).toContain('trae/glm-5.3')
+    expect(html).toContain('HTTP 429')
+  })
+
   it('source status labels', () => {
     const m = load('en')
     expect(m.__test.statusOf({ loggedIn: false }).text).toBe('Signed out')

@@ -39,6 +39,7 @@ import { riskNotice as upstreamRiskNotice } from '../upstreams.js'
 import { getUpstream } from '../upstreams.js'
 import { redactKey } from '../util/redact.js'
 import { Stats, type StatsSnapshot } from './stats.js'
+import { classify, recentFailures } from './failures.js'
 import { CHECKIN_SOURCES, describeReward, loadLedger, mergeStatus, parseTraeCredits, parseWorkbuddyAccounts, recordCheckin, type CheckinStatus } from './checkin.js'
 import { USAGE_UNSUPPORTED, probeEngineSource, fetchEngineUsage, usageFilePath, type SourceUsage } from './usage.js'
 import { writeJson } from '../util/fs.js'
@@ -294,6 +295,49 @@ export class Daemon {
     const m = await this.mgmt()
     for (const c of credsFor(await m.credentials(), def)) await m.deleteCredential(c.name)
     await this.resync()
+  }
+
+  // —— 测一下、最近失败（改写自 dsh-model）——
+
+  /** 「测一下」：经引擎发一句很短的话，看能不能用、多久回复（会用掉一点点额度） */
+  async testModel(model: string): Promise<{ ok: boolean; ms: number; reply?: string; status?: number; advice?: string; message?: string }> {
+    if (!model || model.length > 200) throw new DshModelError('bad_model', L('model 不合法', 'invalid model'))
+    const all = await loadAll(this.ctx)
+    const started = Date.now()
+    let res: Response
+    try {
+      res = await fetch(`http://127.0.0.1:${all.config.port}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${dshKey(all.keys)}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, max_tokens: 256, stream: false, messages: [{ role: 'user', content: L('只回复一个字：好', 'Reply with one word: ok') }] }),
+        signal: AbortSignal.timeout(90_000),
+      })
+    } catch (error) {
+      return { ok: false, ms: Date.now() - started, advice: L('请求没有完成（超时或网络问题）', 'The request did not finish (timeout or network)'), message: String((error as Error).message ?? error) }
+    }
+    const ms = Date.now() - started
+    const text = await res.text()
+    if (res.ok) {
+      let reply = ''
+      try {
+        const m = (JSON.parse(text) as { choices?: { message?: { content?: string; reasoning_content?: string } }[] }).choices?.[0]?.message
+        reply = (m?.content || (m?.reasoning_content ? L('（只返回了思考过程）', '(only reasoning returned)') : '')).trim().slice(0, 80)
+      } catch {
+        // 不是 JSON 也算通了
+      }
+      return { ok: true, ms, reply }
+    }
+    let message = text.slice(0, 300)
+    let code: string | undefined
+    try {
+      const e = (JSON.parse(text) as { error?: { code?: string; message?: string; last_upstream_error?: string } }).error ?? {}
+      code = e.code
+      message = String(e.last_upstream_error || e.message || message).slice(0, 300)
+    } catch {
+      // 原样
+    }
+    const c = classify({ status: res.status, ...(code ? { code } : {}), message })
+    return { ok: false, ms, status: res.status, advice: c.advice, message }
   }
 
   // —— 每日签到（daemon/checkin.ts）——
@@ -888,6 +932,8 @@ export class Daemon {
       if (method === 'GET' && path === '/stats') return ok(this.statsSnapshot())
       if (method === 'GET' && path === '/keys-info') return ok(await this.keysInfo())
       if (method === 'GET' && path === '/checkin') return ok(await this.checkinStatus())
+      if (method === 'POST' && path === '/models/test') return ok(await this.testModel(String(b.model ?? '')))
+      if (method === 'GET' && path === '/failures') return ok(await recentFailures(this.ctx.paths.logs))
       if (method === 'POST' && path === '/checkin/auto') return ok(await this.setAutoCheckin(b.on !== false))
       if (method === 'POST' && seg[0] === 'checkin' && seg[1] && seg[1] !== 'auto') return ok(await this.checkin(seg[1]))
       if (method === 'GET' && path === '/service') return ok(await this.serviceInfo())

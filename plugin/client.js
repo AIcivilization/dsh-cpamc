@@ -375,6 +375,16 @@ window.__ModuleLoader__.load({
       const [q, setQ] = useState('')
       const [msg, setMsg] = useState('')
       const [saving, setSaving] = useState(false)
+      const [tests, setTests] = useState({})
+      const test = async (id) => {
+        setTests((t) => ({ ...t, [id]: { running: true } }))
+        try {
+          const r = await api('POST', '/models/test', { model: id })
+          setTests((t) => ({ ...t, [id]: r }))
+        } catch (e) {
+          setTests((t) => ({ ...t, [id]: { ok: false, advice: e.message } }))
+        }
+      }
       useEffect(() => {
         let alive = true
         api('GET', `/sources/${source.id}/models`).then((r) => {
@@ -406,7 +416,10 @@ window.__ModuleLoader__.load({
         h('div', { style: { maxHeight: 300, overflowY: 'auto' } }, shown.map((m) => h('label', { key: m.id, style: { ...S.line, minHeight: 26, fontSize: 13, cursor: 'pointer', flexWrap: 'nowrap' } },
           h('input', { type: 'checkbox', checked: sel.has(m.id), onChange: () => flip(m.id) }),
           h('span', { style: S.grow }, m.name),
-          m.recommended ? h('span', { title: L('免费额度，已在你的账号上实测调通', 'Free quota, tested OK on your account'), style: { fontSize: 11, color: C.accent } }, L('默认', 'Default')) : null))),
+          m.recommended ? h('span', { title: L('免费额度，已在你的账号上实测调通', 'Free quota, tested OK on your account'), style: { fontSize: 11, color: C.accent } }, L('默认', 'Default')) : null,
+          tests[m.id] ? h('span', { style: { fontSize: 11, color: tests[m.id].running ? C.sub : tests[m.id].ok ? C.ok : C.err, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: tests[m.id].message || tests[m.id].reply || '' },
+            tests[m.id].running ? L('测试中…', 'Testing…') : tests[m.id].ok ? L(`可用 · ${(tests[m.id].ms / 1000).toFixed(1)} 秒${tests[m.id].reply ? ` · ${tests[m.id].reply}` : ''}`, `OK · ${(tests[m.id].ms / 1000).toFixed(1)}s${tests[m.id].reply ? ` · ${tests[m.id].reply}` : ''}`) : (tests[m.id].advice || L('不可用', 'Not working'))) : null,
+          h('button', { type: 'button', title: L('发一句很短的话试试（会用掉一点点额度）', 'Send one short message to try it (uses a tiny bit of quota)'), style: { ...S.btn, padding: '2px 8px' }, disabled: tests[m.id]?.running, onClick: (e) => { e.preventDefault(); void test(m.id) } }, L('测一下', 'Test'))))),
         msg ? h('div', { style: { fontSize: 12, color: C.err, marginTop: 6 } }, msg) : null,
         h('div', { style: { ...S.line, marginTop: 8 } },
           h('button', { type: 'button', style: S.btnPrimary, disabled: saving, onClick: () => save([...sel]) }, saving ? L('保存中…', 'Saving…') : L('保存', 'Save')),
@@ -473,6 +486,25 @@ window.__ModuleLoader__.load({
               s.subscribeUrl && s.pricing.tier !== 'free' ? h('a', { href: s.subscribeUrl, target: '_blank', rel: 'noopener noreferrer', style: { color: C.accent, marginLeft: 8 } }, L('看套餐 ↗', 'Plans ↗')) : null) : null,
             s.loggedIn && s.detail ? h('div', { style: { ...S.meta, paddingLeft: 46, marginTop: 4, color: C.warn } }, s.detail) : null)
         })))
+    }
+
+    /** 最近 24 小时失败的请求：哪个模型、为什么、该怎么办（只有出过错才显示；改写自 dsh-model） */
+    function FailuresCard({ failures }) {
+      const [all, setAll] = useState(false)
+      if (!failures || !failures.length) return null
+      const color = (k) => (k === 'rate' || k === 'upstream' ? C.warn : C.err)
+      const shown = all ? failures : failures.slice(0, 5)
+      return h('div', { style: S.section },
+        h('div', { style: S.h }, L(`最近失败（24 小时内 ${failures.length} 次）`, `Recent failures (${failures.length} in 24 hours)`)),
+        h('p', { style: S.note }, L('经模型服务失败的请求。只记录模型和报错，不记录对话内容。', 'Requests that failed through the model service. Only the model and the error are kept, never the conversation.')),
+        h('div', { style: S.card }, shown.map((f, i) => h('div', { key: `${f.at}-${i}`, style: i ? S.row : S.rowFirst },
+          h('div', { style: S.line },
+            h('span', { style: { ...S.label, ...S.mono, ...S.grow, fontSize: 13 } }, f.model || L('（未知模型）', '(unknown model)')),
+            h('span', { style: { fontSize: 12, color: color(f.kind) } }, `HTTP ${f.status}`),
+            h('span', { style: S.meta }, ago(f.at))),
+          h('div', { style: { fontSize: 13, color: color(f.kind), marginTop: 2 } }, f.advice),
+          f.message ? h('div', { style: { ...S.meta, ...S.mono, marginTop: 2, wordBreak: 'break-all' } }, f.message) : null))),
+        failures.length > 5 ? h('button', { type: 'button', style: { ...S.btn, marginTop: 8 }, onClick: () => setAll(!all) }, all ? L('收起', 'Show less') : L(`全部 ${failures.length} 条`, `All ${failures.length}`)) : null)
     }
 
     // —— API Key（R2 ②）——
@@ -821,15 +853,16 @@ window.__ModuleLoader__.load({
       const openPanel = useRef(null)
       const load = useCallback(async (refresh) => {
         try {
-          const [sources, keys, stats, endpoints, service, checkin] = await Promise.all([
+          const [sources, keys, stats, endpoints, service, checkin, failures] = await Promise.all([
             api('GET', refresh ? '/sources?refresh=1' : '/sources'),
             api('GET', '/keys-info'),
             api('GET', '/stats'),
             api('GET', '/endpoints').catch(() => null),
             api('GET', '/service').catch(() => null),
             api('GET', '/checkin').catch(() => null),
+            api('GET', '/failures').catch(() => null),
           ])
-          if (alive.current) { setData({ sources, keys, stats, endpoints, service, checkin }); setErr(''); setErrCode('') }
+          if (alive.current) { setData({ sources, keys, stats, endpoints, service, checkin, failures }); setErr(''); setErrCode('') }
         } catch (e) {
           if (alive.current) { setErr(e.hint ? `${e.message}（${e.hint}）` : e.message); setErrCode(e.code || '') }
         }
@@ -855,6 +888,7 @@ window.__ModuleLoader__.load({
       return page([
         err ? h('div', { key: 'err', style: { fontSize: 12, color: C.err, marginBottom: 12 } }, err) : null,
         h(ModelsSection, { key: 'models', sources: data.sources, stats: data.stats, checkin: data.checkin, reload: () => load(false), openPanel: () => openPanel.current?.() }),
+        h(FailuresCard, { key: 'failures', failures: data.failures }),
         h(KeysSection, { key: 'keys', info: data.keys, endpoints: data.endpoints, reload: () => load(false) }),
         h(ServiceSection, { key: 'service', service: data.service, checkin: data.checkin, reload: load }),
         isLoopbackPage() ? h(DeploySection, { key: 'deploy' }) : null,
@@ -899,7 +933,7 @@ window.__ModuleLoader__.load({
       }
     }
 
-    module.exports = { name, inject, apply, __test: { RestartBanner, CheckinLine, until, pct, ms, statusOf, newer, Boundary, panelTarget, Header, ModelsSection, KeysSection, ServiceSection, FullFeaturesCard, Onboarding, SelfProgress, SettingsSection, DeploySection } }
+    module.exports = { name, inject, apply, __test: { RestartBanner, CheckinLine, FailuresCard, until, pct, ms, statusOf, newer, Boundary, panelTarget, Header, ModelsSection, KeysSection, ServiceSection, FullFeaturesCard, Onboarding, SelfProgress, SettingsSection, DeploySection } }
     return module.exports
   },
 })

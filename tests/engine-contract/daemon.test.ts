@@ -71,6 +71,14 @@ describe('daemon core against a real engine', () => {
     await daemon.setAutoCheckin(true)
   }, 30_000)
 
+  it('「测一下」reports a model that cannot be served, with a reason', async () => {
+    const r = await daemon.testModel('no-such-model-xyz')
+    expect(r.ok).toBe(false)
+    expect(r.status).toBeGreaterThanOrEqual(400)
+    expect(r.advice).toBeTruthy()
+    await expect(daemon.testModel('')).rejects.toThrow()
+  }, 60_000)
+
   it('show / hide only changes what dsh sees', async () => {
     expect(await daemon.setShown('trae', false)).toEqual({ shown: false })
     expect((await daemon.sources()).find((s) => s.id === 'trae')?.shown).toBe(false)
